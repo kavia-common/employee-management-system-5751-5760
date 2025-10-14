@@ -35,6 +35,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from sqlalchemy.exc import OperationalError
 
 from src.core.logging_config import setup_logging
 from src.middlewares.correlation import CorrelationIdMiddleware, correlation_id_var
@@ -240,6 +241,17 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     """Handle request validation errors consistently."""
     logger.debug("Validation error on request", extra={"errors": "redacted"})
     resp = _error_response(status.HTTP_422_UNPROCESSABLE_ENTITY, "Validation error")
+    _apply_cors_headers(resp, request)
+    return resp
+
+
+@app.exception_handler(OperationalError)
+async def db_operational_error_handler(request: Request, exc: OperationalError):
+    """Handle database operational errors (e.g., missing tables/migrations) gracefully."""
+    logger.error("Database operational error encountered")
+    # Provide a safe message guiding the operator to run migrations
+    message = "Database is not ready. Please apply migrations (e.g., 'alembic upgrade head')."
+    resp = _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, message)
     _apply_cors_headers(resp, request)
     return resp
 
