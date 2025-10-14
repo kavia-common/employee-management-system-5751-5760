@@ -96,7 +96,9 @@ def _compute_trusted_hosts_patterns(sources: List[str]) -> List[str]:
 
 trusted_hosts_patterns = _compute_trusted_hosts_patterns(settings.trusted_hosts)
 # TrustedHostMiddleware requires host patterns (no schemes/ports). In development we allow "*".
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts_patterns)
+# In dev we remain permissive. Explicitly set include_subdomains to False for compatibility
+# with various Starlette versions and to avoid passing unsupported params.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts_patterns, www_redirect=False)
 
 
 def _normalize_origin(origin: str) -> str:
@@ -290,8 +292,14 @@ app.include_router(dashboard_router.router)
 
 # Ensure all responses include Vary: Origin so caches handle per-origin responses safely.
 # CORSMiddleware should do this, but this hook guarantees it across runtime variations.
+# PUBLIC_INTERFACE
 @app.middleware("http")
 async def add_vary_origin_header(request: Request, call_next):
+    """
+    Ensure Vary: Origin header is present on all responses.
+
+    This helps caches differentiate responses based on Origin to comply with CORS behavior.
+    """
     response = await call_next(request)
     try:
         vary_val = response.headers.get("Vary")
@@ -338,6 +346,7 @@ def _derive_frontend_origin_from_request(request: Request) -> Optional[str]:
     "/{path:path}",
     include_in_schema=False,
 )
+# PUBLIC_INTERFACE
 def cors_preflight_fallback(path: str, request: Request) -> Response:
     """
     Fallback handler for CORS preflight requests.
