@@ -59,9 +59,27 @@ def test_dashboard_stats(client: TestClient, db_session: Session):
     headers = {"Authorization": f"Bearer {token}"}
 
     # Seed employees directly for simplicity
-    e1 = Employee(first_name="John", last_name="Doe", email="john@a.com", department="Sales", status=EmployeeStatus.ACTIVE)
-    e2 = Employee(first_name="Jane", last_name="Roe", email="jane@a.com", department="Sales", status=EmployeeStatus.INACTIVE)
-    e3 = Employee(first_name="Ann", last_name="Kay", email="ann@a.com", department="Engineering", status=EmployeeStatus.ACTIVE)
+    e1 = Employee(
+        first_name="John",
+        last_name="Doe",
+        email="john@a.com",
+        department="Sales",
+        status=EmployeeStatus.ACTIVE,
+    )
+    e2 = Employee(
+        first_name="Jane",
+        last_name="Roe",
+        email="jane@a.com",
+        department="Sales",
+        status=EmployeeStatus.INACTIVE,
+    )
+    e3 = Employee(
+        first_name="Ann",
+        last_name="Kay",
+        email="ann@a.com",
+        department="Engineering",
+        status=EmployeeStatus.ACTIVE,
+    )
     db_session.add_all([e1, e2, e3])
     db_session.commit()
 

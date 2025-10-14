@@ -10,13 +10,16 @@ exclude =
     .git,
     __pycache__,
     .venv,
+    */.venv/*,
     venv,
+    env,
     build,
     dist,
     .pytest_cache,
-    interfaces/openapi.json,
-    alembic/versions/*
+    employee_backend/.venv,
+    employee_backend/interfaces/openapi.json,
+    employee_backend/alembic/versions/*
 
 # Relax import/unused checks in package initializers (often intentionally empty or import side-effectful)
 per-file-ignores =
-    src/**/__init__.py: F401,F403
+    employee_backend/src/**/__init__.py: F401,F403

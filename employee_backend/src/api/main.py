@@ -104,6 +104,7 @@ app.include_router(dashboard_router.router)
 # Startup database check & auto-migration
 # ---------------------------------------------------------------------------
 
+
 def _ensure_alembic_upgrade_head() -> None:
     """
     Internal helper to run 'alembic upgrade head' programmatically.
@@ -155,6 +156,7 @@ def _self_test_password_hashing() -> None:
             "Password hashing self-test failed; ensure 'passlib[bcrypt]' is installed and functional."
         )
 
+
 # PUBLIC_INTERFACE
 @app.on_event("startup")
 async def ensure_database_ready_on_startup() -> None:
@@ -180,6 +182,7 @@ async def ensure_database_ready_on_startup() -> None:
 # ---------------------------------------------------------------------------
 # Utilities and common handlers
 # ---------------------------------------------------------------------------
+
 
 def _normalize_origin(origin: str) -> str:
     """Normalize origin by trimming, removing trailing slash, and lowering."""

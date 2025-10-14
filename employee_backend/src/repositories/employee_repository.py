@@ -17,7 +17,12 @@ class EmployeeEmailAlreadyExistsError(Exception):
     """Raised when an employee email uniqueness constraint is violated."""
 
 
-def _apply_filters(stmt: Select, search: Optional[str], department: Optional[str], status: Optional[EmployeeStatus]) -> Select:
+def _apply_filters(
+    stmt: Select,
+    search: Optional[str],
+    department: Optional[str],
+    status: Optional[EmployeeStatus],
+) -> Select:
     if search:
         like = f"%{search.lower()}%"
         stmt = stmt.where(

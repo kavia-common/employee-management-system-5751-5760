@@ -45,7 +45,11 @@ def verify_password(plain_password: str, password_hash: str) -> bool:
 
 
 # PUBLIC_INTERFACE
-def create_access_token(subject: str, expires_minutes: Optional[int] = None, extra_claims: Optional[Dict[str, Any]] = None) -> str:
+def create_access_token(
+    subject: str,
+    expires_minutes: Optional[int] = None,
+    extra_claims: Optional[Dict[str, Any]] = None,
+) -> str:
     """
     Create a signed JWT access token.
 

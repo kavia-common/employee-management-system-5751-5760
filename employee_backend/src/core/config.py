@@ -114,7 +114,12 @@ class Settings:
     # Accept CSV or JSON array; in development default to wildcard for convenience.
     trusted_hosts: List[str] = field(
         default_factory=lambda: (
-            _parse_origins_env(os.getenv("TRUSTED_HOSTS", "")) or (["*"] if os.getenv("ENV", "development") == "development" else [])
+            _parse_origins_env(os.getenv("TRUSTED_HOSTS", ""))
+            or (
+                ["*"]
+                if os.getenv("ENV", "development") == "development"
+                else []
+            )
         ),
     )
 
