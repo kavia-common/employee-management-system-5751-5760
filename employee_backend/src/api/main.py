@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from alembic import command
 from alembic.config import Config
@@ -238,6 +238,11 @@ def _apply_common_headers(resp: Response, request: Request) -> None:
     _apply_cors_headers(resp, request)
     try:
         correlation_id = correlation_id_var.get()
+        if not correlation_id:
+            # Fallback to the value stored on request.state by the CorrelationIdMiddleware.
+            # The middleware resets the contextvar on exception paths, so this preserves
+            # the correlation ID for error responses.
+            correlation_id = getattr(request.state, "correlation_id", None)
         if correlation_id:
             resp.headers["X-Correlation-ID"] = correlation_id
     except Exception:
@@ -320,9 +325,14 @@ def cors_preflight_fallback(path: str, request: Request) -> Response:
     return resp
 
 
-def _error_response(status_code: int, message: str) -> JSONResponse:
+def _error_response(status_code: int, message: str, request: Optional[Request] = None) -> JSONResponse:
     """Build standardized error response payload including correlationId."""
     correlation_id = correlation_id_var.get()
+    if not correlation_id and request is not None:
+        try:
+            correlation_id = getattr(request.state, "correlation_id", None)
+        except Exception:
+            correlation_id = None
     payload = {"error": {"code": status_code, "message": message, "correlationId": correlation_id}}
     return JSONResponse(status_code=status_code, content=payload)
 
@@ -332,7 +342,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Handle HTTP exceptions consistently without leaking internal details."""
     logger.warning("HTTP exception", extra={"status_code": exc.status_code})
     # Use exc.detail string for message
-    resp = _error_response(exc.status_code, str(exc.detail))
+    resp = _error_response(exc.status_code, str(exc.detail), request)
     _apply_common_headers(resp, request)
     return resp
 
@@ -341,7 +351,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Handle request validation errors consistently."""
     logger.debug("Validation error on request", extra={"errors": "redacted"})
-    resp = _error_response(status.HTTP_422_UNPROCESSABLE_ENTITY, "Validation error")
+    resp = _error_response(status.HTTP_422_UNPROCESSABLE_ENTITY, "Validation error", request)
     _apply_common_headers(resp, request)
     return resp
 
@@ -352,7 +362,7 @@ async def db_operational_error_handler(request: Request, exc: OperationalError):
     logger.error("Database operational error encountered")
     # Provide a safe message guiding the operator to run migrations
     message = "Database is not ready. Please apply migrations (e.g., 'alembic upgrade head')."
-    resp = _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, message)
+    resp = _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, message, request)
     _apply_common_headers(resp, request)
     return resp
 
@@ -361,7 +371,7 @@ async def db_operational_error_handler(request: Request, exc: OperationalError):
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Handle unexpected errors with a generic message to avoid exposing internals."""
     logger.exception("Unhandled server error")
-    resp = _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error")
+    resp = _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error", request)
     _apply_common_headers(resp, request)
     return resp
 
