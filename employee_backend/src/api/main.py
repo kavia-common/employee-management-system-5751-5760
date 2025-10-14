@@ -256,6 +256,12 @@ app.add_middleware(
 # Log configured CORS origins at startup (no PII)
 @app.on_event("startup")
 async def _log_cors_config() -> None:
+    """
+    Log effective CORS and middleware configuration at startup.
+
+    PUBLIC_INTERFACE
+    This startup hook emits non-sensitive configuration details for operational visibility.
+    """
     auth_signup_route_present = any(
         getattr(r, "path", "") == "/auth/signup" and "POST" in getattr(r, "methods", set())
         for r in app.routes
@@ -376,9 +382,14 @@ def cors_preflight_fallback(path: str, request: Request) -> Response:
         requested = [h.strip() for h in acr_headers.split(",") if h.strip()]
         allowed_lower = [h.lower() for h in CORS_ALLOW_HEADERS]
         if requested:
-            intersection = [h for h in requested if h.lower() in allowed_lower]
+            # Case-insensitive intersection; if none match, fall back to full configured list
+            intersection = []
+            for h in requested:
+                if h.lower() in allowed_lower and h not in intersection:
+                    intersection.append(h)
             allow_headers_value = ", ".join(intersection) if intersection else ", ".join(CORS_ALLOW_HEADERS)
         else:
+            # No explicit requested headers; return our configured allow list
             allow_headers_value = ", ".join(CORS_ALLOW_HEADERS)
         resp.headers["Access-Control-Allow-Headers"] = allow_headers_value
 
