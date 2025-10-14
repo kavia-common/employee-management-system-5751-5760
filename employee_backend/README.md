@@ -58,16 +58,20 @@ See `.env.example` for a template.
 
 ### CORS Configuration
 
-- The backend reads `CORS_ORIGINS` as a comma-separated list (e.g., `http://localhost:3000,https://frontend-preview.example.com`).
-- If `ENV=development` and `CORS_ORIGINS` is not set, the backend uses safe defaults:
-  - `http://localhost:3000`
-  - `https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000`
-- Do not use wildcard `*` with credentials; the backend is configured with `allow_credentials=True` and explicit origins only.
-- Allowed methods: `GET, POST, PUT, DELETE, OPTIONS, PATCH`
-- Allowed headers: `Authorization, Content-Type, X-Correlation-ID`
-- Exposed headers: `X-Correlation-ID` (so clients can read the correlation ID from responses)
+CORS is currently hardcoded in `src/api/main.py` per user request to always allow the following frontend origins:
+- `https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000`
+- `http://localhost:3000`
+
+Configuration details:
+- allow_credentials: `true`
+- allowed methods: `GET, POST, PUT, DELETE, PATCH, OPTIONS`
+- allowed headers: `Authorization, Content-Type, X-Correlation-ID`
+- exposed headers: `X-Correlation-ID` (so clients can read the correlation ID from responses)
 - The backend emits `Vary: Origin` to ensure proper caching semantics for CORS.
-- Preflight (OPTIONS) requests are handled automatically by the CORS middleware.
+- Preflight (OPTIONS) requests are handled automatically by the CORS middleware, including for `/auth/signup`.
+
+TODO:
+- Revert to environment-based configuration using `CORS_ORIGINS` for production deployments, and remove the hardcoded list in `src/api/main.py`.
 
 ## Migrations
 

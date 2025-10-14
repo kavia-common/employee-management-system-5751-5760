@@ -104,6 +104,8 @@ class Settings:
     log_level: str = field(default=os.getenv("LOG_LEVEL", "INFO"))
 
     # CORS configuration - supports JSON-style or CSV list of origins
+    # NOTE: CORS is currently hardcoded in src.api.main per user request to allow specific preview/local origins.
+    # TODO: Re-enable env-driven CORS via this setting for production deployments.
     cors_origins: List[str] = field(
         default_factory=lambda: _parse_origins_env(os.getenv("CORS_ORIGINS", "")),
     )

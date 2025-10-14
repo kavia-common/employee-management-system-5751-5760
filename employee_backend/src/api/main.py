@@ -56,32 +56,40 @@ app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")  # starlette uses 
 trusted_hosts = settings.trusted_hosts or ["*"]
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
 
-# CORS configuration from environment
-# Use explicit origins; never use "*" with allow_credentials=True.
-# If CORS_ORIGINS is empty and we're in development, use safe defaults.
-dev_default_origins: List[str] = [
-    "http://localhost:3000",
+# CORS configuration (hardcoded per user request)
+# NOTE: This intentionally bypasses env-based configuration to ensure the preview
+# frontend and localhost are always allowed during this phase.
+# TODO: Revert to env-driven configuration (settings.cors_origins) for production readiness.
+HARD_CODED_CORS_ORIGINS: List[str] = [
     "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000",
+    "http://localhost:3000",
 ]
-allow_origins: List[str] = settings.cors_origins or (dev_default_origins if settings.env == "development" else [])
+CORS_ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+CORS_ALLOW_HEADERS: List[str] = ["Authorization", "Content-Type", "X-Correlation-ID"]
 
-# Per requirements: explicit allow methods/headers
-allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
-allow_headers = ["Authorization", "Content-Type", "X-Correlation-ID"]
-
+# Middleware ordering must remain:
+# ProxyHeaders -> TrustedHost -> CORS -> Correlation -> Routers
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allow_origins,
-    allow_credentials=True,  # consistent with frontend usage (cookies or auth headers)
-    allow_methods=allow_methods,
-    allow_headers=allow_headers,
+    allow_origins=HARD_CODED_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=CORS_ALLOW_METHODS,
+    allow_headers=CORS_ALLOW_HEADERS,
     expose_headers=["X-Correlation-ID"],
 )
 
 # Log configured CORS origins at startup (no PII)
 @app.on_event("startup")
 async def _log_cors_config() -> None:
-    logger.info("CORS configured", extra={"origins": allow_origins, "methods": allow_methods, "headers": allow_headers, "trusted_hosts": trusted_hosts})
+    logger.info(
+        "Hardcoded CORS configured",
+        extra={
+            "origins": HARD_CODED_CORS_ORIGINS,
+            "methods": CORS_ALLOW_METHODS,
+            "headers": CORS_ALLOW_HEADERS,
+            "trusted_hosts": trusted_hosts,
+        },
+    )
 
 # Install correlation ID middleware
 app.add_middleware(CorrelationIdMiddleware)
