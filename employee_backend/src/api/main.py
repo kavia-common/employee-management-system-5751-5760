@@ -420,6 +420,18 @@ def health_check() -> Dict[str, str]:
 
 
 @app.get(
+    "/healthz",
+    summary="Health Check (compat)",
+    description="Kubernetes-style liveness probe endpoint. Alias of '/'.",
+    tags=["Health"],
+)
+# PUBLIC_INTERFACE
+def health_check_healthz() -> Dict[str, str]:
+    """Compatibility health endpoint that returns the same response as '/'."""
+    return {"message": "Healthy"}
+
+
+@app.get(
     "/_websocket-usage",
     summary="WebSocket Usage",
     description="This API does not expose WebSocket endpoints currently.",
