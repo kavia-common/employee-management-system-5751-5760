@@ -4,7 +4,9 @@ FastAPI application entry point.
 - Definitive CORS configuration requested:
   allow_origins includes:
     - https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000
+    - https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3002
     - http://localhost:3000
+    - http://localhost:3002
   allow_credentials: True
   allow_methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS']
   allow_headers: ['Authorization','Content-Type','X-Correlation-ID','X-Requested-With']
@@ -65,7 +67,9 @@ app = FastAPI(
 # Definitive CORS settings per request
 CORS_ALLOW_ORIGINS: List[str] = [
     "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000",
+    "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3002",
     "http://localhost:3000",
+    "http://localhost:3002",
 ]
 CORS_ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 CORS_ALLOW_HEADERS: List[str] = ["Authorization", "Content-Type", "X-Correlation-ID", "X-Requested-With"]

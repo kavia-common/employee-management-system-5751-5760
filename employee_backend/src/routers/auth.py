@@ -35,6 +35,7 @@ def signup(payload: UserCreate, db: Session = Depends(get_db)):
     UserRead
         The created user record (without sensitive fields).
     """
+    print("---->1 user", payload)
     user = signup_user(db, email=payload.email, password=payload.password, full_name=payload.full_name)
     return UserRead.model_validate(user)
 

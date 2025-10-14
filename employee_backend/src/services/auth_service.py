@@ -26,6 +26,7 @@ def signup_user(db: Session, email: str, password: str, full_name: Optional[str]
     try:
         password_hash = hash_password(password)
         user = create_user(db, email=email, password_hash=password_hash, full_name=full_name)
+        print("user", user)
         return user
     except EmailAlreadyExistsError:
         # Do not log email (PII). Return 409 Conflict per acceptance criteria.
