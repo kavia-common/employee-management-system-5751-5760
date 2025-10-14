@@ -9,6 +9,13 @@ This backend exposes a REST API for authentication, employee CRUD, and dashboard
 
 ## Quick Start
 
+Note on seed data:
+- In development, the backend can optionally seed a few sample Employees on startup if the table is empty.
+- Control via environment variable:
+  - ENV=development enables seeding by default
+  - Set SEED_ON_STARTUP=false to disable
+  - In production, do not enable seeding.
+
 1) Create and activate a virtual environment:
    - macOS/Linux:
      ```
@@ -53,6 +60,7 @@ These are read from the environment and `.env` for local dev:
 - CORS_ORIGINS (e.g., `http://localhost:3000`)
 - LOG_LEVEL (e.g., `INFO`)
 - ENV (`development` | `production`), default `development`
+- SEED_ON_STARTUP (`true`|`false`): in development only, seed sample employees if table is empty (default: true in development)
 
 See `.env.example` for a template.
 

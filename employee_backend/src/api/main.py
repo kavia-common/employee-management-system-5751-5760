@@ -48,6 +48,7 @@ from src.middlewares.correlation import CorrelationIdMiddleware, correlation_id_
 from src.routers import auth as auth_router
 from src.routers import dashboard as dashboard_router
 from src.routers import employees as employees_router
+from src.services.employee_service import seed_sample_employees_if_needed
 
 # Configure logging at import time
 setup_logging()
@@ -165,18 +166,40 @@ async def ensure_database_ready_on_startup() -> None:
 
     This prevents 500 errors on auth endpoints due to missing tables when
     the service is started without first running migrations.
+
+    Additionally, in development environments, optionally seed sample
+    employees when the table is empty to improve DX and allow the
+    frontend to render lists immediately after login.
     """
     if _core_tables_present():
         # Still perform security self-test to catch missing bcrypt early
         _self_test_password_hashing()
-        return
-    logger.warning("Core tables missing at startup. Attempting to apply migrations...")
-    _ensure_alembic_upgrade_head()
-    # Recheck and log outcome
-    if not _core_tables_present():
-        logger.error("Database still missing core tables after migration attempt.")
-    # Always perform security self-test
-    _self_test_password_hashing()
+    else:
+        logger.warning("Core tables missing at startup. Attempting to apply migrations...")
+        _ensure_alembic_upgrade_head()
+        # Recheck and log outcome
+        if not _core_tables_present():
+            logger.error("Database still missing core tables after migration attempt.")
+        # Always perform security self-test
+        _self_test_password_hashing()
+
+    # Dev-only optional seed
+    try:
+        env = os.getenv("ENV", "development").lower()
+        seed_flag = os.getenv("SEED_ON_STARTUP")
+        # Default: seed in development unless explicitly disabled
+        should_seed = (seed_flag.lower() == "true") if seed_flag else (env == "development")
+        if should_seed:
+            logger.info("Seeding check: attempting to seed sample employees if needed (dev-only).")
+            # Use a short-lived session to avoid interfering with request sessions
+            from src.db.session import SessionLocal
+            with SessionLocal() as db_sess:
+                created = seed_sample_employees_if_needed(db_sess)
+                if created > 0:
+                    logger.info("Seeded %d sample employees.", created)
+    except Exception:
+        # Never block startup due to seeding; log and continue
+        logger.exception("Employee seeding failed; continuing without seed.")
 
 
 # ---------------------------------------------------------------------------

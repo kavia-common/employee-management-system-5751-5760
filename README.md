@@ -13,6 +13,11 @@ Quick steps:
    - JWT_SECRET
    - ENV=development, LOG_LEVEL=INFO
 
+Note: Employees list query parameters:
+- GET /employees supports: page (default 1), size (default 10), search, department, status
+- Response shape: { "data": EmployeeRead[], "pagination": { total, page, size, pages } }
+Ensure your frontend uses the "size" parameter name (not "page_size") and includes Authorization: Bearer <token>.
+
 Note: CORS is hardcoded to allow:
 - `https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000`
 - `http://localhost:3000`
