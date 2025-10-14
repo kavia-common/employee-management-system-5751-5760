@@ -422,12 +422,21 @@ def health_check() -> Dict[str, str]:
 @app.get(
     "/healthz",
     summary="Health Check (compat)",
-    description="Kubernetes-style liveness probe endpoint. Alias of '/'.",
+    description=(
+        "Kubernetes-style liveness probe endpoint. Alias of '/' (GET only). "
+        "Returns 200 with {'message': 'Healthy'}."
+    ),
     tags=["Health"],
 )
 # PUBLIC_INTERFACE
 def health_check_healthz() -> Dict[str, str]:
-    """Compatibility health endpoint that returns the same response as '/'."""
+    """
+    Compatibility health endpoint that returns the same response as '/'.
+
+    Notes:
+    - Method: GET
+    - Response: 200 OK, JSON: {'message': 'Healthy'}
+    """
     return {"message": "Healthy"}
 
 
