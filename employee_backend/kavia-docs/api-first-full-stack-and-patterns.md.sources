@@ -1,0 +1,16 @@
+employee-management-system-5751-5760/employee_backend/interfaces/openapi.json
+employee-management-system-5751-5760/employee_backend/src/api/main.py
+employee-management-system-5751-5760/employee_backend/src/routers/auth.py
+employee-management-system-5751-5760/employee_backend/src/routers/employees.py
+employee-management-system-5751-5760/employee_backend/src/routers/dashboard.py
+employee-management-system-5751-5760/employee_backend/src/schemas/user.py
+employee-management-system-5751-5760/employee_backend/src/schemas/employee.py
+employee-management-system-5751-5760/employee_backend/src/services/auth_service.py
+employee-management-system-5751-5760/employee_backend/src/services/employee_service.py
+employee-management-system-5751-5760/employee_backend/src/repositories/user_repository.py
+employee-management-system-5751-5760/employee_backend/src/repositories/employee_repository.py
+employee-management-system-5751-5760/employee_backend/tests/test_auth.py
+employee-management-system-5751-5760/employee_backend/tests/test_employees.py
+employee-management-system-5751-5760/employee_backend/tests/test_dashboard.py
+employee-management-system-5751-5760/employee_backend/interfaces/frontend-auth-consumption.md
+employee-management-system-5751-5760/employee_backend/README.md
