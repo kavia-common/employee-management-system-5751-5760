@@ -40,6 +40,7 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi import APIRouter as _APIRouter  # local alias to avoid polluting exports
 from sqlalchemy import inspect
 from sqlalchemy.exc import OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -431,14 +432,21 @@ def health_check_head() -> Response:
     return Response(status_code=200)
 
 
-@app.get(
+# Create a tiny router to ensure healthz methods are explicitly bound and not shadowed by exception handlers
+
+_health_router = _APIRouter(tags=["Health"])
+
+# Ensure function definitions are separated by two blank lines to satisfy flake8
+
+
+@_health_router.get(
     "/healthz",
     summary="Health Check (compat)",
     description=(
         "Kubernetes-style liveness probe endpoint. Alias of '/' (GET only). "
         "Returns 200 with {'message': 'Healthy'}."
     ),
-    tags=["Health"],
+    operation_id="health_check_healthz_get",
 )
 # PUBLIC_INTERFACE
 def health_check_healthz() -> Dict[str, str]:
@@ -451,17 +459,24 @@ def health_check_healthz() -> Dict[str, str]:
     """
     return {"message": "Healthy"}
 
+# Ensure separation between endpoint function definitions
 
-@app.head(
+
+@_health_router.head(
     "/healthz",
     summary="Health Check (compat, HEAD)",
     description="HEAD variant of /healthz for load balancers and probes.",
-    tags=["Health"],
+    operation_id="health_check_healthz_head",
 )
 # PUBLIC_INTERFACE
 def health_check_healthz_head() -> Response:
     """Return empty body with 200 OK for HEAD /healthz checks."""
     return Response(status_code=200)
+
+# Ensure the router is included after middlewares and before other routes could interfere
+
+
+app.include_router(_health_router)
 
 
 @app.get(
