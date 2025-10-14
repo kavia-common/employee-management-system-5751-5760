@@ -50,7 +50,7 @@ from src.middlewares.correlation import CorrelationIdMiddleware, correlation_id_
 from src.routers import auth as auth_router
 from src.routers import dashboard as dashboard_router
 from src.routers import employees as employees_router
-from src.services.employee_service import seed_sample_employees_if_needed
+from src.services import seed_sample_employees_if_needed
 
 # Configure logging at import time
 setup_logging()
