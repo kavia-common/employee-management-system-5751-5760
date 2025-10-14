@@ -1,0 +1,122 @@
+"""
+Employees router providing protected CRUD operations with pagination and filtering.
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.orm import Session
+
+from src.db.session import get_db
+from src.models.employee import EmployeeStatus
+from src.schemas.employee import (
+    EmployeeCreate,
+    EmployeeListResponse,
+    EmployeeRead,
+    EmployeeUpdate,
+    Pagination,
+)
+from src.services.auth_service import get_current_user
+from src.services.employee_service import (
+    create_employee_record,
+    delete_employee_record,
+    get_employee_record,
+    list_employee_records,
+    update_employee_record,
+)
+
+router = APIRouter(prefix="/employees", tags=["Employees"])
+
+
+@router.get(
+    "",
+    response_model=EmployeeListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List employees",
+    description="List employees with pagination and optional search/filters.",
+)
+def list_employees_api(
+    page: int = Query(1, ge=1),
+    size: int = Query(10, ge=1, le=100),
+    search: str | None = Query(None),
+    department: str | None = Query(None),
+    status_filter: EmployeeStatus | None = Query(None, alias="status"),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    List employees.
+
+    Query Parameters
+    ----------------
+    page : int
+        Page number starting from 1
+    size : int
+        Page size (1-100)
+    search : str | None
+        Search term applied to name and email
+    department : str | None
+        Department filter
+    status : EmployeeStatus | None
+        Status filter (ACTIVE/INACTIVE)
+    """
+    rows, total, page_num, pages = list_employee_records(
+        db, page=page, size=size, search=search, department=department, status=status_filter
+    )
+    data = [EmployeeRead.model_validate(r) for r in rows]
+    return EmployeeListResponse(
+        data=data, pagination=Pagination(total=total, page=page_num, size=size, pages=pages)
+    )
+
+
+@router.get(
+    "/{employee_id}",
+    response_model=EmployeeRead,
+    status_code=status.HTTP_200_OK,
+    summary="Get employee by ID",
+    description="Retrieve an employee by their unique identifier.",
+)
+def get_employee_api(employee_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Get a single employee by ID."""
+    employee = get_employee_record(db, employee_id)
+    return EmployeeRead.model_validate(employee)
+
+
+@router.post(
+    "",
+    response_model=EmployeeRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create employee",
+    description="Create a new employee record.",
+)
+def create_employee_api(payload: EmployeeCreate, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Create a new employee."""
+    employee = create_employee_record(db, data=payload.model_dump())
+    return EmployeeRead.model_validate(employee)
+
+
+@router.put(
+    "/{employee_id}",
+    response_model=EmployeeRead,
+    status_code=status.HTTP_200_OK,
+    summary="Update employee",
+    description="Update an existing employee record.",
+)
+def update_employee_api(
+    employee_id: int, payload: EmployeeUpdate, db: Session = Depends(get_db), _=Depends(get_current_user)
+):
+    """Update an employee by ID."""
+    employee = update_employee_record(db, employee_id=employee_id, data=payload.model_dump(exclude_unset=True))
+    return EmployeeRead.model_validate(employee)
+
+
+@router.delete(
+    "/{employee_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete employee",
+    description="Delete an employee record by ID.",
+)
+def delete_employee_api(employee_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Delete an employee by ID."""
+    delete_employee_record(db, employee_id)
+    return None
