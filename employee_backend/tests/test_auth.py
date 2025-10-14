@@ -247,3 +247,48 @@ def test_login_response_token_shape(client: TestClient):
     payload = decode_access_token(body["access_token"])
     assert "sub" in payload and payload["sub"]
     assert "iat" in payload and "exp" in payload
+
+
+def test_login_returns_token_and_token_type(client: TestClient):
+    """
+    Ensure that a successful login returns a non-empty JWT access_token and token_type 'bearer'.
+    """
+    # Arrange: create a test user
+    email = "named_check@example.com"
+    password = "StrongPass123"
+    client.post("/auth/signup", json={"email": email, "password": password})
+
+    # Act: login
+    r = client.post("/auth/login", json={"email": email, "password": password})
+
+    # Assert: token shape and presence
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert isinstance(body.get("access_token"), str) and body["access_token"].strip() != ""
+    assert body.get("token_type") == "bearer"
+    # Correlation header should be present
+    assert r.headers.get("X-Correlation-ID")
+
+
+def test_login_invalid_credentials_401_with_cors(client: TestClient):
+    """
+    Invalid credentials should return 401 with standardized error JSON and include CORS headers and Vary: Origin.
+    """
+    origin = "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000"
+
+    # Act: login attempt with nonexistent user
+    r = client.post(
+        "/auth/login",
+        json={"email": "noone@example.com", "password": "WrongPass123"},
+        headers={"Origin": origin},
+    )
+
+    # Assert: 401 with proper JSON envelope and CORS headers
+    assert r.status_code == 401
+    body = r.json()
+    assert "error" in body and body["error"]["code"] == 401
+    assert r.headers.get("access-control-allow-origin") == origin
+    vary = r.headers.get("vary", "")
+    assert "origin" in (vary or "").lower()
+    # Correlation header should be present
+    assert r.headers.get("X-Correlation-ID")
