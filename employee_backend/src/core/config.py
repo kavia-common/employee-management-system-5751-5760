@@ -136,23 +136,15 @@ class Settings:
     def __post_init__(self):
         """
         Validate critical security configuration at startup.
-
-        Security note:
-        - In production you MUST set a strong JWT_SECRET through environment variables.
-        - To improve developer experience and avoid import-time crashes (e.g., when uvicorn
-          imports src.api.main:app or while running tooling), we only emit a warning here
-          instead of raising an exception if JWT_SECRET is missing or a placeholder.
-        - Tests set JWT_SECRET explicitly in tests/conftest.py.
+        Fail fast if JWT_SECRET is not configured to a non-placeholder value.
         """
+        # In tests or certain tooling contexts, raising here immediately surfaces misconfiguration.
+        # Do not allow the insecure placeholder.
         placeholder = "CHANGE_ME_IN_ENV"
         if not self.jwt_secret or self.jwt_secret == placeholder:
-            # Log a clear warning instead of raising to prevent server startup failures in dev
-            # This allows uvicorn to import the app and /docs to load, but MUST be fixed for prod.
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "JWT_SECRET is not configured or uses a placeholder. "
-                "Use a secure random value via environment (.env for development)."
+            # Raise a clear error that instructs operators to set JWT_SECRET in environment/.env
+            raise RuntimeError(
+                "JWT_SECRET is not configured. Set a secure random value in environment (.env for dev)."
             )
 
 

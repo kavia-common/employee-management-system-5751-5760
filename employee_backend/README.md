@@ -37,7 +37,6 @@ Note on seed data:
    - Copy `.env.example` to `.env`
    - Set values as needed for your environment
    - For local development, defaults use SQLite at `sqlite:///./employees.db`
-   - JWT_SECRET: If not set, the app now logs a WARNING and still starts for dev convenience. For production, you MUST set a strong secret; do not rely on defaults.
 
 4) Run database migrations:
    ```

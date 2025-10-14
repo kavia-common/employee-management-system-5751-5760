@@ -10,7 +10,7 @@ Quick steps:
 2) Create venv and `pip install -r requirements.txt`
 3) Copy `.env.example` to `.env`, set:
    - DATABASE_URL (e.g., `sqlite:///./employees.db` for dev)
-   - JWT_SECRET (required for production; in development, the app logs a warning and still starts if missing)
+   - JWT_SECRET
    - ENV=development, LOG_LEVEL=INFO
 
 Note: Employees list query parameters:
