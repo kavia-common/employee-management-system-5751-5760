@@ -16,7 +16,7 @@ Quick steps:
 Note: CORS is hardcoded to allow:
 - `https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000`
 - `http://localhost:3000`
-These ensure preflight and actual requests from the preview/local frontend succeed. For production, migrate to env-driven CORS.
+These ensure preflight and actual requests from the preview/local frontend succeed. Middleware stack simplified to CORSMiddleware + correlation to stabilize startup. For production, migrate to env-driven CORS and reintroduce host/proxy middleware as needed.
 4) Run migrations: `alembic upgrade head`
 5) Start API: `uvicorn src.api.main:app --reload --port 3001`
 

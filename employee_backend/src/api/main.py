@@ -10,8 +10,9 @@ FastAPI application entry point.
   allow_headers: ['Authorization','Content-Type','X-Correlation-ID','X-Requested-With']
   expose_headers: ['X-Correlation-ID']
 
-- Middleware ordering MUST be:
-  ProxyHeadersMiddleware -> TrustedHostMiddleware -> CORSMiddleware -> CorrelationIdMiddleware -> Routers
+- Middleware ordering simplified to avoid startup/import/runtime conflicts:
+  CORSMiddleware -> CorrelationIdMiddleware -> Routers
+  (TrustedHostMiddleware and ProxyHeadersMiddleware temporarily removed)
 
 - Includes a minimal fallback OPTIONS '/{path:path}' route that returns the above headers.
 
@@ -19,8 +20,7 @@ FastAPI application entry point.
 
 Security:
 - No secrets are hardcoded; only CORS origins are fixed as per task requirements.
-- For production, prefer environment-driven origins.
-
+- For production, prefer environment-driven origins and consider re-adding host/proxy middleware.
 """
 
 from __future__ import annotations
@@ -33,8 +33,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from src.core.logging_config import setup_logging
 from src.middlewares.correlation import CorrelationIdMiddleware, correlation_id_var
@@ -60,15 +58,9 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# Middleware ordering: ProxyHeaders -> TrustedHost -> CORS -> Correlation
+# Middleware ordering: CORS -> Correlation
+# (TrustedHost and ProxyHeaders temporarily removed to stabilize startup)
 # ---------------------------------------------------------------------------
-
-# Proxy headers (safe defaults; no parameters required)
-app.add_middleware(ProxyHeadersMiddleware)
-
-# TrustedHostMiddleware: in dev and to avoid startup issues, accept any host.
-# If stricter host checks are required, configure via environment later.
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"], www_redirect=False)
 
 # Definitive CORS settings per request
 CORS_ALLOW_ORIGINS: List[str] = [

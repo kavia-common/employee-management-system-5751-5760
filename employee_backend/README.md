@@ -59,7 +59,8 @@ See `.env.example` for a template.
 ### CORS Configuration
 
 CORS is configured in `src/api/main.py` with this fixed middleware ordering:
-- ProxyHeadersMiddleware -> TrustedHostMiddleware -> CORSMiddleware -> Correlation middleware -> Routers
+- CORSMiddleware -> Correlation middleware -> Routers
+  (TrustedHostMiddleware and ProxyHeadersMiddleware temporarily removed to stabilize startup)
 
 Effective configuration (hardcoded as requested):
 - Allowed origins:
@@ -102,11 +103,11 @@ Verification steps:
    - `Vary: Origin`
 
 Notes:
-- If running behind a proxy, `ProxyHeadersMiddleware` supports `X-Forwarded-*` headers; `TrustedHostMiddleware` accepts all hosts in this dev setup to avoid startup issues.
+- For production, consider re-adding `TrustedHostMiddleware` and `ProxyHeadersMiddleware` with environment-driven configuration once startup/runtime conflicts are addressed.
 - Make sure your frontend uses the exact Origin (scheme + host + port) listed in allowed origins.
 
 TODO:
-- For production, move CORS allowlist back to environment-driven configuration and restrict TrustedHost allowed_hosts appropriately.
+- For production, move CORS allowlist back to environment-driven configuration and set appropriate trusted hosts.
 
 ## Migrations
 
