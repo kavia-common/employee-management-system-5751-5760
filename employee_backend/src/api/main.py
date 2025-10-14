@@ -103,6 +103,42 @@ def _normalize_origin(origin: str) -> str:
     return o.lower()
 
 
+def _is_origin_allowed(origin: str | None) -> bool:
+    """Check if the provided origin is in the allowlist (case-insensitive, no trailing slash)."""
+    if not origin:
+        return False
+    allowed = [_normalize_origin(o) for o in CORS_ALLOW_ORIGINS]
+    return _normalize_origin(origin) in allowed
+
+
+def _apply_cors_headers(resp: Response, request: Request) -> None:
+    """
+    Apply CORS headers to the response if the Origin is allowed.
+
+    This is used as a safety net for error responses produced by exception handlers
+    so that browsers still receive the necessary headers to surface details to client code.
+    """
+    try:
+        origin = request.headers.get("origin")
+        if _is_origin_allowed(origin):
+            # Mirror the origin and include standard headers
+            resp.headers["Access-Control-Allow-Origin"] = origin  # exact echo
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+            # Expose correlation id header for tracing across client
+            if CORS_EXPOSE_HEADERS:
+                resp.headers["Access-Control-Expose-Headers"] = ", ".join(CORS_EXPOSE_HEADERS)
+        # Always ensure Vary: Origin is present
+        vary_val = resp.headers.get("Vary")
+        if vary_val:
+            if "Origin" not in [v.strip() for v in vary_val.split(",")]:
+                resp.headers["Vary"] = vary_val + ", Origin"
+        else:
+            resp.headers["Vary"] = "Origin"
+    except Exception:
+        # Never let CORS header application break the response path
+        pass
+
+
 # PUBLIC_INTERFACE
 @app.middleware("http")
 async def add_vary_origin_header(request: Request, call_next):
@@ -150,14 +186,14 @@ def cors_preflight_fallback(path: str, request: Request) -> Response:
     acr_headers = request.headers.get("access-control-request-headers", "")
     resp = Response(status_code=200)
 
-    # Normalize for comparison
-    allowed = [_normalize_origin(o) for o in CORS_ALLOW_ORIGINS]
-    origin_norm = _normalize_origin(origin) if origin else None
+    # Always ensure Vary: Origin is set for caches
+    vary_val = resp.headers.get("Vary")
+    resp.headers["Vary"] = (vary_val + ", Origin") if vary_val and "Origin" not in vary_val else "Origin"
 
-    if origin_norm and origin_norm in allowed:
+    # Normalize for comparison
+    if _is_origin_allowed(origin):
         # Mirror origin if allowed
         resp.headers["Access-Control-Allow-Origin"] = origin
-        resp.headers["Vary"] = "Origin"
         resp.headers["Access-Control-Allow-Methods"] = ", ".join(CORS_ALLOW_METHODS)
 
         requested = [h.strip() for h in acr_headers.split(",") if h.strip()]
@@ -190,21 +226,27 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Handle HTTP exceptions consistently without leaking internal details."""
     logger.warning("HTTP exception", extra={"status_code": exc.status_code})
     # Use exc.detail string for message
-    return _error_response(exc.status_code, str(exc.detail))
+    resp = _error_response(exc.status_code, str(exc.detail))
+    _apply_cors_headers(resp, request)
+    return resp
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Handle request validation errors consistently."""
     logger.debug("Validation error on request", extra={"errors": "redacted"})
-    return _error_response(status.HTTP_422_UNPROCESSABLE_ENTITY, "Validation error")
+    resp = _error_response(status.HTTP_422_UNPROCESSABLE_ENTITY, "Validation error")
+    _apply_cors_headers(resp, request)
+    return resp
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Handle unexpected errors with a generic message to avoid exposing internals."""
     logger.exception("Unhandled server error")
-    return _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error")
+    resp = _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error")
+    _apply_cors_headers(resp, request)
+    return resp
 
 
 @app.get(
