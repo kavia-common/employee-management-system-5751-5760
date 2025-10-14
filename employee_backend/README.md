@@ -59,8 +59,14 @@ See `.env.example` for a template.
 ### CORS Configuration
 
 - The backend reads `CORS_ORIGINS` as a comma-separated list (e.g., `http://localhost:3000,https://frontend-preview.example.com`).
-- If `ENV=development` and `CORS_ORIGINS` is not set, the backend allows `*` as a convenience for local development.
-- In production, always set `CORS_ORIGINS` explicitly and avoid wildcard.
+- If `ENV=development` and `CORS_ORIGINS` is not set, the backend uses safe defaults:
+  - `http://localhost:3000`
+  - `https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000`
+- Do not use wildcard `*` with credentials; the backend is configured with `allow_credentials=True` and explicit origins only.
+- Allowed methods: `GET, POST, PUT, DELETE, OPTIONS`
+- Allowed headers: `*`
+- Exposed headers: `X-Correlation-ID` (so clients can read the correlation ID from responses)
+- Preflight (OPTIONS) requests are handled automatically by the CORS middleware.
 
 ## Migrations
 

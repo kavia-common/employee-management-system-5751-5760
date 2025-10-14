@@ -1,7 +1,7 @@
 """
 FastAPI application entry point.
 
-- Configures CORS from environment variables
+- Configures CORS from environment variables with explicit allowed origins
 - Installs correlation ID middleware and structured JSON logging
 - Registers API routers with OpenAPI tags
 - Provides health endpoint and consistent exception handling returning:
@@ -44,14 +44,26 @@ app = FastAPI(
 )
 
 # CORS configuration from environment
-allow_origins: List[str] = settings.cors_origins if settings.cors_origins else []
+# Use explicit origins; never use "*" with allow_credentials=True.
+# If CORS_ORIGINS is empty and we're in development, use safe defaults.
+dev_default_origins: List[str] = [
+    "http://localhost:3000",
+    "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000",
+]
+allow_origins: List[str] = settings.cors_origins or (dev_default_origins if settings.env == "development" else [])
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allow_origins if allow_origins else ["*"] if settings.env == "development" else [],
+    allow_origins=allow_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["X-Correlation-ID"],
 )
+
+# Log configured CORS origins at startup (no PII)
+@app.on_event("startup")
+async def _log_cors_config() -> None:
+    logger.info("CORS configured for origins %s", allow_origins)
 
 # Install correlation ID middleware
 app.add_middleware(CorrelationIdMiddleware)
@@ -72,7 +84,7 @@ def _error_response(status_code: int, message: str) -> JSONResponse:
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Handle HTTP exceptions consistently without leaking internal details."""
-    # Don't include path or PII in logs; log code and route for ops
+    # Don't include path or PII in logs; log code for ops
     logger.warning("HTTP exception", extra={"status_code": exc.status_code})
     return _error_response(exc.status_code, str(exc.detail))
 

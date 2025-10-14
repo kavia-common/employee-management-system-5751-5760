@@ -85,3 +85,33 @@ def test_me_requires_auth(client: TestClient):
     assert r.status_code == 401
     body = r.json()
     assert "error" in body and body["error"]["code"] == 401
+
+
+def test_cors_preflight_signup(client: TestClient):
+    """
+    Simulate a browser preflight (OPTIONS) request to /auth/signup and
+    verify CORS headers are present for the configured origin.
+    """
+    origin = "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000"
+    headers = {
+        "Origin": origin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+    }
+    r = client.options("/auth/signup", headers=headers)
+    assert r.status_code in (200, 204)
+    assert r.headers.get("access-control-allow-origin") == origin
+
+
+def test_cors_post_signup_includes_headers(client: TestClient):
+    """
+    Ensure that an actual POST to /auth/signup includes the proper
+    Access-Control-Allow-Origin header and exposes X-Correlation-ID.
+    """
+    origin = "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000"
+    payload = {"email": "cors@example.com", "password": "StrongPass123"}
+    r = client.post("/auth/signup", json=payload, headers={"Origin": origin})
+    # 201 on first run; if re-run, may return 400 (duplicate). We only check CORS headers.
+    assert r.headers.get("access-control-allow-origin") == origin
+    expose = r.headers.get("access-control-expose-headers", "")
+    assert "X-Correlation-ID" in expose
