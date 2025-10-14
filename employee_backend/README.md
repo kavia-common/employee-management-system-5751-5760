@@ -58,20 +58,21 @@ See `.env.example` for a template.
 
 ### CORS Configuration
 
-CORS is currently hardcoded in `src/api/main.py` per user request to always allow the following frontend origins:
+CORS is currently configured in `src/api/main.py` to always allow the following frontend origins by default (fallback):
 - `https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000`
 - `http://localhost:3000`
 
-Configuration details:
+Effective configuration details:
 - allow_credentials: `true`
 - allowed methods: `GET, POST, PUT, DELETE, PATCH, OPTIONS`
-- allowed headers: `Authorization, Content-Type, X-Correlation-ID`
+- allowed headers: `Authorization, Content-Type, X-Correlation-ID, X-Requested-With`
 - exposed headers: `X-Correlation-ID` (so clients can read the correlation ID from responses)
-- The backend emits `Vary: Origin` to ensure proper caching semantics for CORS.
-- Preflight (OPTIONS) requests are handled automatically by the CORS middleware, including for `/auth/signup`.
+- The backend emits `Vary: Origin` on responses to ensure proper caching semantics for CORS.
+- Preflight (OPTIONS) requests are handled by the CORS middleware. An explicit safety-net route also returns 200 with proper CORS headers (including for `/auth/signup`).
+- Environment override: set `CORS_ORIGINS` (CSV or JSON array) to customize allowed origins. You may also set `FRONTEND_ORIGIN` for a single origin.
 
 TODO:
-- Revert to environment-based configuration using `CORS_ORIGINS` for production deployments, and remove the hardcoded list in `src/api/main.py`.
+- For production, prefer environment-based configuration using `CORS_ORIGINS` and remove reliance on hardcoded fallback defaults in `src/api/main.py`.
 
 ## Migrations
 
