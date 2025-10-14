@@ -40,7 +40,6 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi import APIRouter as _APIRouter  # local alias to avoid polluting exports
 from sqlalchemy import inspect
 from sqlalchemy.exc import OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -103,7 +102,6 @@ app.include_router(auth_router.router)
 app.include_router(employees_router.router)
 app.include_router(dashboard_router.router)
 
-
 # ---------------------------------------------------------------------------
 # Startup database check & auto-migration
 # ---------------------------------------------------------------------------
@@ -150,6 +148,7 @@ def _self_test_password_hashing() -> None:
     try:
         # Lazy import to avoid any potential circular imports at import time
         from src.core.security import hash_password, verify_password  # type: ignore
+
         test_pw = "self-test-password"
         hashed = hash_password(test_pw)
         if not verify_password(test_pw, hashed):
@@ -196,6 +195,7 @@ async def ensure_database_ready_on_startup() -> None:
             logger.info("Seeding check: attempting to seed sample employees if needed (dev-only).")
             # Use a short-lived session to avoid interfering with request sessions
             from src.db.session import SessionLocal
+
             with SessionLocal() as db_sess:
                 created = seed_sample_employees_if_needed(db_sess)
                 if created > 0:
@@ -203,7 +203,6 @@ async def ensure_database_ready_on_startup() -> None:
     except Exception:
         # Never block startup due to seeding; log and continue
         logger.exception("Employee seeding failed; continuing without seed.")
-
 
 # ---------------------------------------------------------------------------
 # Utilities and common handlers
@@ -366,7 +365,7 @@ def _error_response(status_code: int, message: str, request: Optional[Request] =
         except Exception:
             correlation_id = None
     payload = {"error": {"code": status_code, "message": message, "correlationId": correlation_id}}
-    return JSONResponse(status_code=status_code, content=payload)
+    return JSONResponse(status_code=status.HTTP_200_OK if status_code == 200 else status_code, content=payload)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -428,6 +427,7 @@ def health_check() -> Dict[str, str]:
         "Returns 200 with {'message': 'Healthy'}."
     ),
     tags=["Health"],
+    operation_id="health_check_healthz_get",
 )
 # PUBLIC_INTERFACE
 def health_check_healthz_app() -> Dict[str, str]:
@@ -447,51 +447,17 @@ def health_check_head() -> Response:
     return Response(status_code=200)
 
 
-# Create a tiny router to ensure healthz methods are explicitly bound and not shadowed by exception handlers
-
-_health_router = _APIRouter(tags=["Health"])
-
-# Ensure function definitions are separated by two blank lines to satisfy flake8
-
-
-@_health_router.get(
-    "/healthz",
-    summary="Health Check (compat)",
-    description=(
-        "Kubernetes-style liveness probe endpoint. Alias of '/' (GET only). "
-        "Returns 200 with {'message': 'Healthy'}."
-    ),
-    operation_id="health_check_healthz_get",
-)
-# PUBLIC_INTERFACE
-def health_check_healthz() -> Dict[str, str]:
-    """
-    Compatibility health endpoint that returns the same response as '/'.
-
-    Notes:
-    - Method: GET
-    - Response: 200 OK, JSON: {'message': 'Healthy'}
-    """
-    return {"message": "Healthy"}
-
-# Ensure separation between endpoint function definitions
-
-
-@_health_router.head(
+@app.head(
     "/healthz",
     summary="Health Check (compat, HEAD)",
     description="HEAD variant of /healthz for load balancers and probes.",
+    tags=["Health"],
     operation_id="health_check_healthz_head",
 )
 # PUBLIC_INTERFACE
 def health_check_healthz_head() -> Response:
     """Return empty body with 200 OK for HEAD /healthz checks."""
     return Response(status_code=200)
-
-# Ensure the router is included after middlewares and before other routes could interfere
-
-
-app.include_router(_health_router)
 
 
 @app.get(
