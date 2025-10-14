@@ -49,3 +49,6 @@ alembic==1.14.0
 # Auth helpers (planned use)
 passlib[bcrypt]==1.7.4
 python-jose[cryptography]==3.3.0
+# Pin bcrypt to a version compatible with passlib 1.7.4 to avoid backend detection errors
+# (e.g., missing __about__ attribute) and ensure stable hashing behavior.
+bcrypt==4.0.1
