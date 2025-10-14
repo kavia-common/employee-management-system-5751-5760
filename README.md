@@ -13,6 +13,11 @@ Quick steps:
    - JWT_SECRET
    - ENV=development, LOG_LEVEL=INFO
 
+Error responses:
+- Structured JSON is returned for error paths with a correlationId for support tracing:
+  {"error": {"code": 401, "message": "Invalid credentials", "correlationId": "<uuid>"}}
+- The header X-Correlation-ID is included on both success and error responses, and is exposed via CORS headers.
+
 Note: Employees list query parameters:
 - GET /employees supports: page (default 1), size (default 10), search, department, status
 - Response shape: { "data": EmployeeRead[], "pagination": { total, page, size, pages } }

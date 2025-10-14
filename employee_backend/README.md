@@ -42,6 +42,7 @@ Note on seed data:
    ```
    alembic upgrade head
    ```
+   Note: The application attempts to auto-run Alembic migrations on startup if core tables are missing. Still, prefer running migrations explicitly as part of deployment pipelines.
 
 5) Start the API locally (port 3001):
    ```

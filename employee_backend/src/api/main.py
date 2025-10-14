@@ -277,18 +277,24 @@ def _apply_common_headers(resp: Response, request: Request) -> None:
 @app.middleware("http")
 async def add_vary_origin_header(request: Request, call_next):
     """
-    Ensure Vary: Origin header is present on all responses.
+    Ensure Vary: Origin header is present on all responses and apply common headers.
 
-    This helps caches differentiate responses by Origin to comply with CORS.
+    This helps caches differentiate responses by Origin to comply with CORS and
+    ensures Access-Control-Expose-Headers, Access-Control-Allow-Origin (when allowed),
+    and X-Correlation-ID are applied to all responses.
     """
     response = await call_next(request)
     try:
+        # Always ensure Vary: Origin
         vary_val = response.headers.get("Vary")
         if vary_val:
             if "Origin" not in [v.strip() for v in vary_val.split(",")]:
                 response.headers["Vary"] = vary_val + ", Origin"
         else:
             response.headers["Vary"] = "Origin"
+
+        # Apply common headers (CORS + correlation) post-handler as safety net
+        _apply_common_headers(response, request)
     except Exception:
         # Do not fail response for header adjustments
         pass
