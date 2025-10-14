@@ -419,6 +419,18 @@ def health_check() -> Dict[str, str]:
     return {"message": "Healthy"}
 
 
+@app.head(
+    "/",
+    summary="Health Check (HEAD)",
+    description="HEAD variant of the health check for load balancers and probes.",
+    tags=["Health"],
+)
+# PUBLIC_INTERFACE
+def health_check_head() -> Response:
+    """Return empty body with 200 OK for HEAD health checks."""
+    return Response(status_code=200)
+
+
 @app.get(
     "/healthz",
     summary="Health Check (compat)",
@@ -438,6 +450,18 @@ def health_check_healthz() -> Dict[str, str]:
     - Response: 200 OK, JSON: {'message': 'Healthy'}
     """
     return {"message": "Healthy"}
+
+
+@app.head(
+    "/healthz",
+    summary="Health Check (compat, HEAD)",
+    description="HEAD variant of /healthz for load balancers and probes.",
+    tags=["Health"],
+)
+# PUBLIC_INTERFACE
+def health_check_healthz_head() -> Response:
+    """Return empty body with 200 OK for HEAD /healthz checks."""
+    return Response(status_code=200)
 
 
 @app.get(
