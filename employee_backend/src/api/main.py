@@ -59,11 +59,43 @@ app = FastAPI(
 # - TrustedHostMiddleware: restrict allowed Host headers (defense in depth)
 # - CORSMiddleware: must be added before routers to handle preflight
 # - CorrelationIdMiddleware: tracing and logging
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")  # starlette uses this to parse forwarded headers
+app.add_middleware(ProxyHeadersMiddleware)  # starlette uses this to parse forwarded headers
 
 # Trusted hosts from settings; default is permissive in dev
-trusted_hosts = settings.trusted_hosts or ["*"]
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
+def _compute_trusted_hosts_patterns(sources: List[str]) -> List[str]:
+    """
+    Convert environment-provided trusted hosts (which may be full origins) into
+    host patterns consumable by Starlette's TrustedHostMiddleware.
+    Examples:
+      - "https://example.com:3000" -> "example.com"
+      - "http://localhost:3000" -> "localhost"
+      - "*" -> "*"
+    """
+    if not sources:
+        return ["*"]
+    patterns: List[str] = []
+    for raw in sources:
+        if not raw:
+            continue
+        s = raw.strip()
+        if s == "*":
+            # Wildcard shortcut
+            patterns = ["*"]
+            break
+        # Remove scheme if provided
+        if "://" in s:
+            s = s.split("://", 1)[1]
+        # Remove path or trailing slash
+        s = s.split("/", 1)[0].rstrip("/")
+        # Drop port if included
+        if ":" in s:
+            s = s.split(":", 1)[0]
+        if s:
+            patterns.append(s)
+    return patterns or ["*"]
+
+trusted_hosts_patterns = _compute_trusted_hosts_patterns(settings.trusted_hosts)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts_patterns)
 
 
 def _normalize_origin(origin: str) -> str:
@@ -230,7 +262,7 @@ async def _log_cors_config() -> None:
             "headers": CORS_ALLOW_HEADERS,
             "expose_headers": CORS_EXPOSE_HEADERS,
             "allow_credentials": True,
-            "trusted_hosts": trusted_hosts,
+            "trusted_hosts": trusted_hosts_patterns,
             "auth_signup_path": "/auth/signup",
             "auth_signup_route_present": auth_signup_route_present,
         },
