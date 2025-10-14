@@ -1,12 +1,14 @@
 """
 FastAPI application entry point.
 
-- Definitive CORS configuration requested:
+- Definitive CORS configuration requested (dev preview + localhost):
   allow_origins includes:
     - https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000
     - https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3002
     - http://localhost:3000
     - http://localhost:3002
+
+- Developer note: prefer running uvicorn on port 3002 for local/dev consistency with docs.
   allow_credentials: True
   allow_methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS']
   allow_headers: ['Authorization','Content-Type','X-Correlation-ID','X-Requested-With']

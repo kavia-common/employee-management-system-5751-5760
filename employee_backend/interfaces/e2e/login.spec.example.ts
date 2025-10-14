@@ -20,7 +20,7 @@ describe("Login flow", () => {
   const password = "StrongPass123";
 
   function signupViaApi() {
-    const api = Cypress.env("REACT_APP_API_BASE_URL") || "http://localhost:3001";
+    const api = Cypress.env("REACT_APP_API_BASE_URL") || "http://localhost:3002";
     return cy.request({
       method: "POST",
       url: `${api}/auth/signup`,

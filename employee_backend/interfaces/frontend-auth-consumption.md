@@ -123,5 +123,5 @@ Login form handler guardrails:
 - If access_token missing, show: "Login succeeded but token was missing. Please try again or contact support."
 
 Notes:
-- Set REACT_APP_API_BASE_URL in the frontend .env (e.g., http://localhost:3001).
+- Set REACT_APP_API_BASE_URL in the frontend .env (e.g., http://localhost:3002).
 - Ensure Axios/fetch includes credentials if needed for CORS scenarios.

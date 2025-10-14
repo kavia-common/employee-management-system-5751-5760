@@ -44,11 +44,11 @@ Note on seed data:
    ```
    Note: The application attempts to auto-run Alembic migrations on startup if core tables are missing. Still, prefer running migrations explicitly as part of deployment pipelines.
 
-5) Start the API locally (port 3001):
+5) Start the API locally (port 3002):
    ```
-   uvicorn src.api.main:app --reload --host 0.0.0.0 --port 3001
+   uvicorn src.api.main:app --reload --host 0.0.0.0 --port 3002
    ```
-   - OpenAPI docs: http://localhost:3001/docs
+   - OpenAPI docs: http://localhost:3002/docs
 
 ## Environment Variables
 
@@ -85,10 +85,10 @@ Effective configuration (hardcoded as requested):
 - A minimal safety-net route (`OPTIONS /{path:path}`) returns 200 with proper CORS headers for allowed origins (including `/auth/signup`).
 
 Verification steps:
-1) Start API: `uvicorn src.api.main:app --reload --host 0.0.0.0 --port 3001`
+1) Start API: `uvicorn src.api.main:app --reload --host 0.0.0.0 --port 3002`
 2) Preflight (example for preview on 3000; repeat with 3002 or localhost as needed):
    ```
-   curl -i -X OPTIONS http://localhost:3001/auth/signup \
+   curl -i -X OPTIONS http://localhost:3002/auth/signup \
      -H "Origin: https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000" \
      -H "Access-Control-Request-Method: POST" \
      -H "Access-Control-Request-Headers: content-type,authorization,x-correlation-id,x-requested-with"
@@ -102,7 +102,7 @@ Verification steps:
    - `Vary: Origin`
 3) Actual request (works from either 3000 or 3002; use your active frontend port):
    ```
-   curl -i -X POST http://localhost:3001/auth/signup \
+   curl -i -X POST http://localhost:3002/auth/signup \
      -H "Origin: https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3002" \
      -H "Content-Type: application/json" \
      -d '{"email":"user@example.com","password":"StrongPass123"}'
@@ -174,7 +174,7 @@ Notes:
   - Built-in defaults allow preview (3000/3002) and localhost (3000/3002)
   - Or set `CORS_ORIGINS` if you re-enable env-driven CORS
 - Ensure frontend points to backend:
-  - In frontend `.env.local`, set `REACT_APP_API_BASE_URL` to the backend URL (e.g., `http://localhost:3001`)
+  - In frontend `.env.local`, set `REACT_APP_API_BASE_URL` to the backend URL (e.g., `http://localhost:3002`)
 - Run migrations before first start:
   - `alembic upgrade head`
 
@@ -219,7 +219,7 @@ After both containers are running:
   - Ensure you run from the `employee_backend` directory:
     ```
     cd employee_backend
-    uvicorn src.api.main:app --reload --host 0.0.0.0 --port 3001
+    uvicorn src.api.main:app --reload --host 0.0.0.0 --port 3002
     ```
   - Confirm Python dependencies: `pip install -r requirements.txt`
   - If there were local edits to `src/api/main.py`, verify there are no syntax errors and that middleware `add_middleware` calls do not pass invalid parameters.

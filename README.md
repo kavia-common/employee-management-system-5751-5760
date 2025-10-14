@@ -25,11 +25,17 @@ Ensure your frontend uses the "size" parameter name (not "page_size") and includ
 
 Note: CORS is hardcoded to allow:
 - `https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000`
+- `https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3002`
 - `http://localhost:3000`
+- `http://localhost:3002`
 These ensure preflight and actual requests from the preview/local frontend succeed. Middleware stack simplified to CORSMiddleware + correlation to stabilize startup. For production, migrate to env-driven CORS and reintroduce host/proxy middleware as needed.
 4) Run migrations: `alembic upgrade head`
-5) Start API: `uvicorn src.api.main:app --reload --port 3001`
+5) Start API: `uvicorn src.api.main:app --reload --port 3002`
 
-OpenAPI docs: http://localhost:3001/docs
+OpenAPI docs: http://localhost:3002/docs
 
 See `employee_backend/README.md` for full documentation and smoke tests.
+
+Frontend configuration note:
+- Ensure your frontend points to the backend on port 3002:
+  - Set REACT_APP_API_BASE_URL=http://localhost:3002 (or the preview URL equivalent)
