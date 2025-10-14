@@ -28,16 +28,22 @@ Security:
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Dict, List
 
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
+from sqlalchemy import inspect
 from sqlalchemy.exc import OperationalError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.core.logging_config import setup_logging
+from src.db.session import engine
 from src.middlewares.correlation import CorrelationIdMiddleware, correlation_id_var
 from src.routers import auth as auth_router
 from src.routers import dashboard as dashboard_router
@@ -95,6 +101,61 @@ app.include_router(dashboard_router.router)
 
 
 # ---------------------------------------------------------------------------
+# Startup database check & auto-migration
+# ---------------------------------------------------------------------------
+
+def _ensure_alembic_upgrade_head() -> None:
+    """
+    Internal helper to run 'alembic upgrade head' programmatically.
+
+    Avoids blowing up the app on failure; logs errors and allows request-time
+    handlers to respond gracefully if DB remains unavailable.
+    """
+    try:
+        project_root = Path(__file__).resolve().parents[2]  # employee_backend/
+        alembic_ini = project_root / "alembic.ini"
+        migrations_dir = project_root / "alembic"
+        cfg = Config(str(alembic_ini))
+        # Explicitly set script location and DB URL for safety in various run contexts
+        cfg.set_main_option("script_location", str(migrations_dir))
+        cfg.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", "sqlite:///./employees.db"))
+        command.upgrade(cfg, "head")
+        logger.info("Alembic migrations applied (upgrade head).")
+    except Exception:
+        logger.exception("Failed to run Alembic migrations at startup.")
+
+
+def _core_tables_present() -> bool:
+    """Return True if essential tables exist (users, employees)."""
+    try:
+        with engine.connect() as conn:
+            insp = inspect(conn)
+            return insp.has_table("users") and insp.has_table("employees")
+    except Exception:
+        # Connection failure or engine issues; treat as not present
+        logger.warning("Unable to inspect database for core tables.", exc_info=True)
+        return False
+
+
+# PUBLIC_INTERFACE
+@app.on_event("startup")
+async def ensure_database_ready_on_startup() -> None:
+    """
+    Apply Alembic migrations at startup if core tables are missing.
+
+    This prevents 500 errors on auth endpoints due to missing tables when
+    the service is started without first running migrations.
+    """
+    if _core_tables_present():
+        return
+    logger.warning("Core tables missing at startup. Attempting to apply migrations...")
+    _ensure_alembic_upgrade_head()
+    # Recheck and log outcome
+    if not _core_tables_present():
+        logger.error("Database still missing core tables after migration attempt.")
+
+
+# ---------------------------------------------------------------------------
 # Utilities and common handlers
 # ---------------------------------------------------------------------------
 
@@ -141,6 +202,21 @@ def _apply_cors_headers(resp: Response, request: Request) -> None:
             resp.headers["Vary"] = "Origin"
     except Exception:
         # Never let CORS header application break the response path
+        pass
+
+
+def _apply_common_headers(resp: Response, request: Request) -> None:
+    """
+    Apply CORS headers and ensure X-Correlation-ID is set on responses,
+    including error responses produced by exception handlers.
+    """
+    _apply_cors_headers(resp, request)
+    try:
+        correlation_id = correlation_id_var.get()
+        if correlation_id:
+            resp.headers["X-Correlation-ID"] = correlation_id
+    except Exception:
+        # Do not fail response for header adjustments
         pass
 
 
@@ -232,7 +308,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     logger.warning("HTTP exception", extra={"status_code": exc.status_code})
     # Use exc.detail string for message
     resp = _error_response(exc.status_code, str(exc.detail))
-    _apply_cors_headers(resp, request)
+    _apply_common_headers(resp, request)
     return resp
 
 
@@ -241,7 +317,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     """Handle request validation errors consistently."""
     logger.debug("Validation error on request", extra={"errors": "redacted"})
     resp = _error_response(status.HTTP_422_UNPROCESSABLE_ENTITY, "Validation error")
-    _apply_cors_headers(resp, request)
+    _apply_common_headers(resp, request)
     return resp
 
 
@@ -252,7 +328,7 @@ async def db_operational_error_handler(request: Request, exc: OperationalError):
     # Provide a safe message guiding the operator to run migrations
     message = "Database is not ready. Please apply migrations (e.g., 'alembic upgrade head')."
     resp = _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, message)
-    _apply_cors_headers(resp, request)
+    _apply_common_headers(resp, request)
     return resp
 
 
@@ -261,7 +337,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     """Handle unexpected errors with a generic message to avoid exposing internals."""
     logger.exception("Unhandled server error")
     resp = _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error")
-    _apply_cors_headers(resp, request)
+    _apply_common_headers(resp, request)
     return resp
 
 

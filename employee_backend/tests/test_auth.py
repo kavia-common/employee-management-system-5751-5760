@@ -67,10 +67,16 @@ def test_signup_login_me_flow(client: TestClient):
     assert r3.status_code == 200, r3.text
     token = r3.json()["access_token"]
     assert token
+    # Ensure correlation header exists on success responses as well
+    assert r3.headers.get("X-Correlation-ID")
 
     # Invalid login
     r4 = client.post("/auth/login", json={"email": payload["email"], "password": "WrongPass!"})
     assert r4.status_code == 401
+    # Error payload shape and correlation header
+    body4 = r4.json()
+    assert "error" in body4 and body4["error"]["code"] == 401
+    assert r4.headers.get("X-Correlation-ID")
 
     # Current user
     headers = {"Authorization": f"Bearer {token}"}
@@ -85,6 +91,8 @@ def test_me_requires_auth(client: TestClient):
     assert r.status_code == 401
     body = r.json()
     assert "error" in body and body["error"]["code"] == 401
+    # Ensure correlation header on error responses
+    assert r.headers.get("X-Correlation-ID")
 
 
 def test_cors_preflight_signup(client: TestClient):
@@ -104,6 +112,8 @@ def test_cors_preflight_signup(client: TestClient):
     vary = r.headers.get("vary", "")
     # Starlette sets Vary to include Origin for CORS handling
     assert "origin" in vary.lower()
+    # Correlation header should be present on normal responses
+    assert r.headers.get("X-Correlation-ID")
 
 
 def test_cors_post_signup_includes_headers(client: TestClient):
@@ -120,6 +130,8 @@ def test_cors_post_signup_includes_headers(client: TestClient):
     assert "X-Correlation-ID" in expose
     vary = r.headers.get("vary", "")
     assert "origin" in vary.lower()
+    # Correlation header should be set
+    assert r.headers.get("X-Correlation-ID")
 
 
 def test_cors_post_login_invalid_includes_headers(client: TestClient):
@@ -137,6 +149,8 @@ def test_cors_post_login_invalid_includes_headers(client: TestClient):
     assert r.headers.get("access-control-allow-origin") == origin
     body = r.json()
     assert "error" in body and body["error"]["code"] == 401
+    # Correlation header present on error responses
+    assert r.headers.get("X-Correlation-ID")
 
 
 def test_cors_post_login_success_includes_headers(client: TestClient):
@@ -155,3 +169,22 @@ def test_cors_post_login_success_includes_headers(client: TestClient):
     assert r.headers.get("access-control-allow-origin") == origin
     expose = r.headers.get("access-control-expose-headers", "")
     assert "X-Correlation-ID" in expose
+    # Correlation header present on success responses
+    assert r.headers.get("X-Correlation-ID")
+
+
+def test_duplicate_signup_returns_409_with_cors(client: TestClient):
+    """
+    Duplicate signup should return 409 Conflict and include proper CORS headers when Origin is supplied.
+    """
+    origin = "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000"
+    payload = {"email": "dup@example.com", "password": "StrongPass123"}
+    r1 = client.post("/auth/signup", json=payload)
+    assert r1.status_code in (201, 409)
+
+    r2 = client.post("/auth/signup", json=payload, headers={"Origin": origin})
+    assert r2.status_code == 409
+    assert r2.headers.get("access-control-allow-origin") == origin
+    body = r2.json()
+    assert "error" in body and body["error"]["code"] == 409
+    assert r2.headers.get("X-Correlation-ID")
