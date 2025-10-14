@@ -362,10 +362,12 @@ def cors_preflight_fallback(path: str, request: Request) -> Response:
       Access-Control-Allow-Credentials for allowed origins, and includes
       Vary: Origin as required by the acceptance criteria.
     """
+    # Read relevant request headers used by browsers for preflight
     origin = request.headers.get("origin")
+
     acr_headers = request.headers.get("access-control-request-headers", "")
 
-    # 200 OK for preflight to align with common CORS behavior and acceptance criteria
+    # 200 OK for preflight to align with acceptance criteria
     resp = Response(status_code=200)
 
     # Normalize and prepare allowed origins for this request
@@ -380,11 +382,12 @@ def cors_preflight_fallback(path: str, request: Request) -> Response:
 
     # Only return CORS headers if the origin is explicitly allowed
     if origin_norm and origin_norm in allowed_norm:
+        # Mirror the Origin back when allowed
         resp.headers["Access-Control-Allow-Origin"] = origin
         # Emit Vary: Origin for correct caching semantics
         resp.headers["Vary"] = "Origin"
 
-        # Methods: return configured allowed methods
+        # Methods: include OPTIONS and POST at minimum; we return configured set
         resp.headers["Access-Control-Allow-Methods"] = ", ".join(CORS_ALLOW_METHODS)
 
         # Headers: return the intersection of requested and configured, or our allowlist if none match
@@ -392,7 +395,7 @@ def cors_preflight_fallback(path: str, request: Request) -> Response:
         allowed_lower = [h.lower() for h in CORS_ALLOW_HEADERS]
         if requested:
             # Case-insensitive intersection; if none match, fall back to full configured list
-            intersection = []
+            intersection: list[str] = []
             for h in requested:
                 if h.lower() in allowed_lower and h not in intersection:
                     intersection.append(h)
@@ -405,10 +408,10 @@ def cors_preflight_fallback(path: str, request: Request) -> Response:
         # Credentials policy must align with CORSMiddleware
         resp.headers["Access-Control-Allow-Credentials"] = "true"
 
-        # Cache preflight response briefly
+        # Cache preflight response briefly to reduce repeated preflight overhead
         resp.headers["Access-Control-Max-Age"] = "600"
 
-    # If origin is not allowed, return 200 without CORS headers (preflight should then fail)
+    # If origin is not allowed, return 200 without CORS headers (preflight will fail as desired)
     return resp
 
 

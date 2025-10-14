@@ -42,12 +42,9 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
             logger.exception("Unhandled exception during request processing")
             raise
         finally:
-            # Ensure the correlation ID is set on the outbound response header
-            try:
-                # Response may not exist if exception occurred before call_next, handled by exception handlers
-                pass
-            finally:
-                correlation_id_var.reset(token)
+            # Always reset context var to avoid leaking correlation ID across requests
+            correlation_id_var.reset(token)
         # Add/overwrite the header on successful responses
+        # Note: response object exists here; exception cases are handled by global handlers
         response.headers[CORRELATION_HEADER] = correlation_id
         return response
