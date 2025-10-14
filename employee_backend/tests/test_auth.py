@@ -120,3 +120,38 @@ def test_cors_post_signup_includes_headers(client: TestClient):
     assert "X-Correlation-ID" in expose
     vary = r.headers.get("vary", "")
     assert "origin" in vary.lower()
+
+
+def test_cors_post_login_invalid_includes_headers(client: TestClient):
+    """
+    Invalid login should return 401 with standardized body and include CORS headers
+    so browsers surface the error to client code instead of failing CORS.
+    """
+    origin = "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000"
+    r = client.post(
+        "/auth/login",
+        json={"email": "nouser@example.com", "password": "WrongPass!"},
+        headers={"Origin": origin},
+    )
+    assert r.status_code == 401
+    assert r.headers.get("access-control-allow-origin") == origin
+    body = r.json()
+    assert "error" in body and body["error"]["code"] == 401
+
+
+def test_cors_post_login_success_includes_headers(client: TestClient):
+    """
+    Successful login should include CORS headers as well.
+    """
+    origin = "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000"
+    # Ensure user exists
+    client.post("/auth/signup", json={"email": "loginuser@example.com", "password": "StrongPass123"})
+    r = client.post(
+        "/auth/login",
+        json={"email": "loginuser@example.com", "password": "StrongPass123"},
+        headers={"Origin": origin},
+    )
+    assert r.status_code == 200, r.text
+    assert r.headers.get("access-control-allow-origin") == origin
+    expose = r.headers.get("access-control-expose-headers", "")
+    assert "X-Correlation-ID" in expose
