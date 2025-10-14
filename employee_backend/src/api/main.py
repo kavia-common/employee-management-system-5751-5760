@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, List
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -66,6 +66,7 @@ HARD_CODED_CORS_ORIGINS: List[str] = [
 ]
 CORS_ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 CORS_ALLOW_HEADERS: List[str] = ["Authorization", "Content-Type", "X-Correlation-ID"]
+CORS_EXPOSE_HEADERS: List[str] = ["X-Correlation-ID"]
 
 # Middleware ordering must remain:
 # ProxyHeaders -> TrustedHost -> CORS -> Correlation -> Routers
@@ -75,19 +76,27 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=CORS_ALLOW_METHODS,
     allow_headers=CORS_ALLOW_HEADERS,
-    expose_headers=["X-Correlation-ID"],
+    expose_headers=CORS_EXPOSE_HEADERS,
 )
 
 # Log configured CORS origins at startup (no PII)
 @app.on_event("startup")
 async def _log_cors_config() -> None:
+    auth_signup_route_present = any(
+        getattr(r, "path", "") == "/auth/signup" and "POST" in getattr(r, "methods", set())
+        for r in app.routes
+    )
     logger.info(
         "Hardcoded CORS configured",
         extra={
             "origins": HARD_CODED_CORS_ORIGINS,
             "methods": CORS_ALLOW_METHODS,
             "headers": CORS_ALLOW_HEADERS,
+            "expose_headers": CORS_EXPOSE_HEADERS,
+            "allow_credentials": True,
             "trusted_hosts": trusted_hosts,
+            "auth_signup_path": "/auth/signup",
+            "auth_signup_route_present": auth_signup_route_present,
         },
     )
 
@@ -98,6 +107,60 @@ app.add_middleware(CorrelationIdMiddleware)
 app.include_router(auth_router.router)
 app.include_router(employees_router.router)
 app.include_router(dashboard_router.router)
+
+# PUBLIC_INTERFACE
+@app.options(
+    "/{path:path}",
+    include_in_schema=False,
+)
+def cors_preflight_fallback(path: str, request: Request) -> Response:
+    """
+    Fallback handler for CORS preflight requests.
+
+    Important:
+    - CORSMiddleware should normally intercept and respond to preflight OPTIONS
+      requests before they reach the router.
+    - This route acts as a safety net to ensure preflight succeeds by returning
+      the correct CORS headers when the origin is allowed. It uses the same
+      allowlist configured for CORSMiddleware.
+    """
+    origin = request.headers.get("origin")
+    acr_headers = request.headers.get("access-control-request-headers", "")
+
+    # 204 No Content is the typical preflight response code
+    resp = Response(status_code=204)
+
+    # Normalize and validate the origin against the configured allowlist
+    allowed_norm = [o.lower().rstrip("/") for o in HARD_CODED_CORS_ORIGINS]
+    origin_norm = origin.lower().rstrip("/") if origin else None
+
+    # Only return CORS headers if the origin is explicitly allowed
+    if origin_norm and origin_norm in allowed_norm:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        # Emit Vary: Origin for correct caching semantics
+        resp.headers["Vary"] = "Origin"
+
+        # Methods: return configured allowed methods
+        resp.headers["Access-Control-Allow-Methods"] = ", ".join(CORS_ALLOW_METHODS)
+
+        # Headers: return the intersection of requested and configured, or our allowlist if none match
+        requested = [h.strip() for h in acr_headers.split(",") if h.strip()]
+        allowed_lower = [h.lower() for h in CORS_ALLOW_HEADERS]
+        if requested:
+            intersection = [h for h in requested if h.lower() in allowed_lower]
+            allow_headers_value = ", ".join(intersection) if intersection else ", ".join(CORS_ALLOW_HEADERS)
+        else:
+            allow_headers_value = ", ".join(CORS_ALLOW_HEADERS)
+        resp.headers["Access-Control-Allow-Headers"] = allow_headers_value
+
+        # Credentials policy must align with CORSMiddleware
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+
+        # Cache preflight response briefly
+        resp.headers["Access-Control-Max-Age"] = "600"
+
+    # If origin is not allowed, return 204 without CORS headers (preflight should then fail)
+    return resp
 
 
 def _error_response(status_code: int, message: str) -> JSONResponse:
@@ -135,6 +198,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     description="Simple health check endpoint.",
     tags=["Health"],
 )
+# PUBLIC_INTERFACE
 def health_check() -> Dict[str, str]:
     """Return a basic health status response."""
     return {"message": "Healthy"}
@@ -146,6 +210,7 @@ def health_check() -> Dict[str, str]:
     description="This API does not expose WebSocket endpoints currently.",
     tags=["Health"],
 )
+# PUBLIC_INTERFACE
 def websocket_help() -> Dict[str, str]:
     """Explicitly document WebSocket usage (none for this project)."""
     return {"message": "No WebSocket endpoints available."}
