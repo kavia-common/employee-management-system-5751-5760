@@ -1,26 +1,32 @@
 """
 FastAPI application entry point.
 
-- Configures CORS with robust origin derivation:
-  1) Use settings.cors_origins (CSV or JSON from CORS_ORIGINS)
-  2) If empty, use FRONTEND_ORIGIN env var (single or CSV/JSON)
-  3) If still empty, try deriving from a :3001 backend to :3000 frontend on the same host
-  4) As a last resort, include preview/local defaults to avoid empty allow_origins
-- Installs correlation ID middleware and structured JSON logging
-- Registers API routers with OpenAPI tags
-- Provides health endpoint and consistent exception handling returning:
-  { "error": { "code": <int>, "message": <str>, "correlationId": <str|null> } }
+- Definitive CORS configuration requested:
+  allow_origins includes:
+    - https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000
+    - http://localhost:3000
+  allow_credentials: True
+  allow_methods: ['GET','POST','PUT','DELETE','PATCH','OPTIONS']
+  allow_headers: ['Authorization','Content-Type','X-Correlation-ID','X-Requested-With']
+  expose_headers: ['X-Correlation-ID']
+
+- Middleware ordering MUST be:
+  ProxyHeadersMiddleware -> TrustedHostMiddleware -> CORSMiddleware -> CorrelationIdMiddleware -> Routers
+
+- Includes a minimal fallback OPTIONS '/{path:path}' route that returns the above headers.
+
+- Provides OpenAPI docs tags and simple health endpoints.
 
 Security:
-- Do not hardcode secrets. Preview/local origins are included as safe defaults to ensure CORS headers are always emitted.
-- TODO: For production, set CORS_ORIGINS or FRONTEND_ORIGIN in the environment explicitly.
+- No secrets are hardcoded; only CORS origins are fixed as per task requirements.
+- For production, prefer environment-driven origins.
+
 """
 
 from __future__ import annotations
 
 import logging
-import os
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -30,7 +36,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from src.core.config import settings
 from src.core.logging_config import setup_logging
 from src.middlewares.correlation import CorrelationIdMiddleware, correlation_id_var
 from src.routers import auth as auth_router
@@ -54,198 +59,26 @@ app = FastAPI(
     openapi_tags=openapi_tags,
 )
 
-# Middleware ordering:
-# - ProxyHeadersMiddleware: respect X-Forwarded-* when behind a proxy/load balancer
-# - TrustedHostMiddleware: restrict allowed Host headers (defense in depth)
-# - CORSMiddleware: must be added before routers to handle preflight
-# - CorrelationIdMiddleware: tracing and logging
-app.add_middleware(ProxyHeadersMiddleware)  # starlette uses this to parse forwarded headers
+# ---------------------------------------------------------------------------
+# Middleware ordering: ProxyHeaders -> TrustedHost -> CORS -> Correlation
+# ---------------------------------------------------------------------------
 
-# Trusted hosts from settings; default is permissive in dev
-def _compute_trusted_hosts_patterns(sources: List[str]) -> List[str]:
-    """
-    Convert environment-provided trusted hosts (which may be full origins) into
-    host patterns consumable by Starlette's TrustedHostMiddleware.
-    Examples:
-      - "https://example.com:3000" -> "example.com"
-      - "http://localhost:3000" -> "localhost"
-      - "*" -> "*"
-    """
-    if not sources:
-        return ["*"]
-    patterns: List[str] = []
-    for raw in sources:
-        if not raw:
-            continue
-        s = raw.strip()
-        if s == "*":
-            # Wildcard shortcut
-            patterns = ["*"]
-            break
-        # Remove scheme if provided
-        if "://" in s:
-            s = s.split("://", 1)[1]
-        # Remove path or trailing slash
-        s = s.split("/", 1)[0].rstrip("/")
-        # Drop port if included
-        if ":" in s:
-            s = s.split(":", 1)[0]
-        if s:
-            patterns.append(s)
-    return patterns or ["*"]
+# Proxy headers (safe defaults; no parameters required)
+app.add_middleware(ProxyHeadersMiddleware)
 
-trusted_hosts_patterns = _compute_trusted_hosts_patterns(settings.trusted_hosts)
-# TrustedHostMiddleware requires host patterns (no schemes/ports). In development we allow "*".
-# In dev we remain permissive. Explicitly set include_subdomains to False for compatibility
-# with various Starlette versions and to avoid passing unsupported params.
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts_patterns, www_redirect=False)
+# TrustedHostMiddleware: in dev and to avoid startup issues, accept any host.
+# If stricter host checks are required, configure via environment later.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"], www_redirect=False)
 
-
-def _normalize_origin(origin: str) -> str:
-    """
-    Normalize an origin string for comparison/usage:
-    - strip whitespace
-    - remove trailing slash
-    - lowercase (scheme/host are case-insensitive)
-    """
-    o = (origin or "").strip()
-    if not o:
-        return ""
-    if o.endswith("/"):
-        o = o[:-1]
-    return o.lower()
-
-
-def _parse_env_origins(value: str) -> List[str]:
-    """
-    Parse env-provided origins. Accepts:
-    - JSON array: '["https://a", "http://b:3000"]'
-    - CSV: 'https://a,http://b:3000'
-    - Single string: 'https://a'
-    Returns unique, normalized origins preserving input order.
-    """
-    if not value:
-        return []
-    value = value.strip()
-    parsed: List[str] = []
-    # Try JSON-style array first
-    if value.startswith("[") and value.endswith("]"):
-        try:
-            import json
-
-            arr = json.loads(value)
-            if isinstance(arr, list):
-                parsed = [str(x) for x in arr if str(x).strip()]
-        except Exception:
-            # Fall back to CSV
-            pass
-    if not parsed:
-        parts = [p.strip() for p in value.split(",") if p.strip()]
-        parsed = parts
-
-    result: List[str] = []
-    seen = set()
-    for item in parsed:
-        norm = _normalize_origin(item)
-        if norm and norm not in seen:
-            seen.add(norm)
-            result.append(norm)
-    return result
-
-
-def _try_derive_frontend_from_backend_env() -> List[str]:
-    """
-    Attempt to derive a paired frontend origin from environment hints about backend's own origin.
-
-    If a backend origin indicates port 3001 on host H, assume frontend is on the same host at port 3000.
-    Checks several common env var names without assuming their presence.
-    """
-    candidates = [
-        os.getenv("BACKEND_ORIGIN", ""),
-        os.getenv("API_BASE_URL", ""),
-        os.getenv("BACKEND_BASE_URL", ""),
-        os.getenv("EXTERNAL_URL", ""),
-    ]
-    for raw in candidates:
-        if not raw:
-            continue
-        o = _normalize_origin(raw)
-        if not o:
-            continue
-        # Expect "scheme://host[:port]"
-        # Cheap parse: find ':3001' at the end of netloc
-        # Examples:
-        #  - https://example.com:3001 -> https://example.com:3000
-        #  - http://localhost:3001 -> http://localhost:3000
-        # If there is no explicit :3001, skip (cannot reliably derive).
-        if ":3001" in o:
-            scheme_host = o.split("://", 1)
-            if len(scheme_host) == 2:
-                scheme, host_port = scheme_host
-                derived = f"{scheme}://{host_port.replace(':3001', ':3000')}"
-                return [_normalize_origin(derived)]
-    return []
-
-
-def _compute_cors_allow_origins() -> List[str]:
-    """
-    Compute a non-empty list of allowed origins for CORS.
-
-    Priority:
-    1) settings.cors_origins
-    2) FRONTEND_ORIGIN env var (supports JSON/CSV/single)
-    3) Derive from backend origin envs with :3001 -> :3000 mapping
-    4) Final fallback to preview/local defaults to ensure CORS is never disabled
-    """
-    origins: List[str] = []
-
-    # 1) From settings (CORS_ORIGINS), already normalized by config
-    for o in settings.cors_origins:
-        norm = _normalize_origin(o)
-        if norm and norm not in origins:
-            origins.append(norm)
-
-    # 2) FRONTEND_ORIGIN env (single or CSV/JSON)
-    fe_env_raw = os.getenv("FRONTEND_ORIGIN", "")
-    for o in _parse_env_origins(fe_env_raw):
-        if o not in origins:
-            origins.append(o)
-
-    # 3) Derive from backend :3001 -> :3000 mapping if still empty
-    if not origins:
-        derived = _try_derive_frontend_from_backend_env()
-        for o in derived:
-            if o not in origins:
-                origins.append(o)
-
-    # 4) Final fallback to ensure non-empty list in preview/local
-    # Include preview environment URL and localhost. This prevents CORS omission causing signup failures.
-    if not origins:
-        preview_defaults = [
-            "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000",
-            "http://localhost:3000",
-        ]
-        for o in preview_defaults:
-            norm = _normalize_origin(o)
-            if norm not in origins:
-                origins.append(norm)
-
-    return origins
-
-
-# Effective CORS settings
-# Must be non-empty and include both preview frontend and localhost in fallback:
-# - https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000
-# - http://localhost:3000
-CORS_ALLOW_ORIGINS: List[str] = _compute_cors_allow_origins()
+# Definitive CORS settings per request
+CORS_ALLOW_ORIGINS: List[str] = [
+    "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000",
+    "http://localhost:3000",
+]
 CORS_ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 CORS_ALLOW_HEADERS: List[str] = ["Authorization", "Content-Type", "X-Correlation-ID", "X-Requested-With"]
 CORS_EXPOSE_HEADERS: List[str] = ["X-Correlation-ID"]
 
-# Middleware ordering must remain:
-# ProxyHeaders -> TrustedHost -> CORS -> Correlation -> Routers
-# Note: CORSMiddleware automatically adds the appropriate CORS headers for both
-# preflight and actual requests. We explicitly set allow/expose headers and methods.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOW_ORIGINS,
@@ -255,50 +88,36 @@ app.add_middleware(
     expose_headers=CORS_EXPOSE_HEADERS,
 )
 
-# Log configured CORS origins at startup (no PII)
-@app.on_event("startup")
-async def _log_cors_config() -> None:
-    """
-    Log effective CORS and middleware configuration at startup.
-
-    PUBLIC_INTERFACE
-    This startup hook emits non-sensitive configuration details for operational visibility.
-    """
-    auth_signup_route_present = any(
-        getattr(r, "path", "") == "/auth/signup" and "POST" in getattr(r, "methods", set())
-        for r in app.routes
-    )
-    logger.info(
-        "CORS configured",
-        extra={
-            "origins": CORS_ALLOW_ORIGINS,
-            "methods": CORS_ALLOW_METHODS,
-            "headers": CORS_ALLOW_HEADERS,
-            "expose_headers": CORS_EXPOSE_HEADERS,
-            "allow_credentials": True,
-            "trusted_hosts": trusted_hosts_patterns,
-            "auth_signup_path": "/auth/signup",
-            "auth_signup_route_present": auth_signup_route_present,
-        },
-    )
-
-# Install correlation ID middleware
+# Correlation ID middleware
 app.add_middleware(CorrelationIdMiddleware)
 
-# Include routers
+# Routers
 app.include_router(auth_router.router)
 app.include_router(employees_router.router)
 app.include_router(dashboard_router.router)
 
-# Ensure all responses include Vary: Origin so caches handle per-origin responses safely.
-# CORSMiddleware should do this, but this hook guarantees it across runtime variations.
+
+# ---------------------------------------------------------------------------
+# Utilities and common handlers
+# ---------------------------------------------------------------------------
+
+def _normalize_origin(origin: str) -> str:
+    """Normalize origin by trimming, removing trailing slash, and lowering."""
+    o = (origin or "").strip()
+    if not o:
+        return ""
+    if o.endswith("/"):
+        o = o[:-1]
+    return o.lower()
+
+
 # PUBLIC_INTERFACE
 @app.middleware("http")
 async def add_vary_origin_header(request: Request, call_next):
     """
     Ensure Vary: Origin header is present on all responses.
 
-    This helps caches differentiate responses based on Origin to comply with CORS behavior.
+    This helps caches differentiate responses by Origin to comply with CORS.
     """
     response = await call_next(request)
     try:
@@ -309,36 +128,9 @@ async def add_vary_origin_header(request: Request, call_next):
         else:
             response.headers["Vary"] = "Origin"
     except Exception:
-        # Do not fail response path for header adjustments
+        # Do not fail response for header adjustments
         pass
     return response
-
-
-def _derive_frontend_origin_from_request(request: Request) -> Optional[str]:
-    """
-    Try to derive an origin for a paired frontend on the same host when backend runs on :3001.
-    Uses forwarded headers when available. This is a best-effort fallback primarily for preview.
-    """
-    # Prefer forwarded headers when behind a proxy
-    fwd_host = request.headers.get("x-forwarded-host")
-    fwd_proto = request.headers.get("x-forwarded-proto")
-    host = fwd_host or request.headers.get("host") or request.url.netloc
-    proto = fwd_proto or request.url.scheme or "https"
-
-    if not host:
-        return None
-
-    # Extract hostname and port
-    hostname = host
-    port: Optional[str] = None
-    if ":" in host:
-        hostname, port = host.rsplit(":", 1)
-
-    # Only derive if explicit 3001 is detected
-    if port == "3001":
-        scheme = "https" if (proto or "").lower() == "https" else "http"
-        return _normalize_origin(f"{scheme}://{hostname}:3000")
-    return None
 
 
 # PUBLIC_INTERFACE
@@ -346,72 +138,51 @@ def _derive_frontend_origin_from_request(request: Request) -> Optional[str]:
     "/{path:path}",
     include_in_schema=False,
 )
-# PUBLIC_INTERFACE
 def cors_preflight_fallback(path: str, request: Request) -> Response:
     """
-    Fallback handler for CORS preflight requests.
+    Minimal fallback handler for CORS preflight requests.
 
-    Important:
-    - CORSMiddleware should normally intercept and respond to preflight OPTIONS
-      requests before they reach the router.
-    - This route acts as a safety net to ensure preflight succeeds by returning
-      the correct CORS headers when the origin is allowed. It uses the same
-      allowlist configured for CORSMiddleware, plus a best-effort derived origin
-      for :3001 -> :3000 paired host setups.
-    - Returns 200 with Access-Control-Allow-Origin, -Methods, -Headers, and
-      Access-Control-Allow-Credentials for allowed origins, and includes
-      Vary: Origin as required by the acceptance criteria.
+    CORSMiddleware should handle OPTIONS before routing. This route ensures that,
+    if OPTIONS reaches routing, the response still includes expected headers
+    for allowed origins.
+
+    Returns 200 with:
+      - Access-Control-Allow-Origin (echoed origin if allowed)
+      - Access-Control-Allow-Methods (configured list)
+      - Access-Control-Allow-Headers (intersection or configured list)
+      - Access-Control-Allow-Credentials: true
+      - Access-Control-Max-Age
+      - Vary: Origin
     """
-    # Read relevant request headers used by browsers for preflight
     origin = request.headers.get("origin")
-
     acr_headers = request.headers.get("access-control-request-headers", "")
-
-    # 200 OK for preflight to align with acceptance criteria
     resp = Response(status_code=200)
 
-    # Normalize and prepare allowed origins for this request
-    allowed_norm = [o.lower().rstrip("/") for o in CORS_ALLOW_ORIGINS]
-    derived = _derive_frontend_origin_from_request(request)
-    if derived:
-        dnorm = derived.lower().rstrip("/")
-        if dnorm not in allowed_norm:
-            allowed_norm.append(dnorm)
+    # Normalize for comparison
+    allowed = [_normalize_origin(o) for o in CORS_ALLOW_ORIGINS]
+    origin_norm = _normalize_origin(origin) if origin else None
 
-    origin_norm = origin.lower().rstrip("/") if origin else None
-
-    # Only return CORS headers if the origin is explicitly allowed
-    if origin_norm and origin_norm in allowed_norm:
-        # Mirror the Origin back when allowed
+    if origin_norm and origin_norm in allowed:
+        # Mirror origin if allowed
         resp.headers["Access-Control-Allow-Origin"] = origin
-        # Emit Vary: Origin for correct caching semantics
         resp.headers["Vary"] = "Origin"
-
-        # Methods: include OPTIONS and POST at minimum; we return configured set
         resp.headers["Access-Control-Allow-Methods"] = ", ".join(CORS_ALLOW_METHODS)
 
-        # Headers: return the intersection of requested and configured, or our allowlist if none match
         requested = [h.strip() for h in acr_headers.split(",") if h.strip()]
         allowed_lower = [h.lower() for h in CORS_ALLOW_HEADERS]
         if requested:
-            # Case-insensitive intersection; if none match, fall back to full configured list
+            # Case-insensitive intersection; if none, return configured list
             intersection: list[str] = []
             for h in requested:
                 if h.lower() in allowed_lower and h not in intersection:
                     intersection.append(h)
             allow_headers_value = ", ".join(intersection) if intersection else ", ".join(CORS_ALLOW_HEADERS)
         else:
-            # No explicit requested headers; return our configured allow list
             allow_headers_value = ", ".join(CORS_ALLOW_HEADERS)
         resp.headers["Access-Control-Allow-Headers"] = allow_headers_value
-
-        # Credentials policy must align with CORSMiddleware
         resp.headers["Access-Control-Allow-Credentials"] = "true"
-
-        # Cache preflight response briefly to reduce repeated preflight overhead
         resp.headers["Access-Control-Max-Age"] = "600"
 
-    # If origin is not allowed, return 200 without CORS headers (preflight will fail as desired)
     return resp
 
 
@@ -425,8 +196,8 @@ def _error_response(status_code: int, message: str) -> JSONResponse:
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Handle HTTP exceptions consistently without leaking internal details."""
-    # Don't include path or PII in logs; log code for ops
     logger.warning("HTTP exception", extra={"status_code": exc.status_code})
+    # Use exc.detail string for message
     return _error_response(exc.status_code, str(exc.detail))
 
 

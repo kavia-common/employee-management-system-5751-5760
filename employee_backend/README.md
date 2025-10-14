@@ -58,25 +58,23 @@ See `.env.example` for a template.
 
 ### CORS Configuration
 
-CORS is configured in `src/api/main.py` with correct middleware ordering:
+CORS is configured in `src/api/main.py` with this fixed middleware ordering:
 - ProxyHeadersMiddleware -> TrustedHostMiddleware -> CORSMiddleware -> Correlation middleware -> Routers
 
-It ensures `allow_origins` is never empty. Fallback defaults include:
-- `https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000`
-- `http://localhost:3000`
-
-Effective configuration details:
-- allow_credentials: `true`
-- allowed methods: `GET, POST, PUT, DELETE, PATCH, OPTIONS`
-- allowed headers: `Authorization, Content-Type, X-Correlation-ID, X-Requested-With`
-- exposed headers: `X-Correlation-ID` (so clients can read the correlation ID from responses)
-- The backend emits `Vary: Origin` on responses to ensure proper caching semantics for CORS.
-- Preflight (OPTIONS) requests are handled by the CORS middleware. An explicit safety-net route (`OPTIONS /{path:path}`) returns 200 with proper CORS headers if the Origin is allowed (including for `/auth/signup`).
-- Environment override: set `CORS_ORIGINS` (CSV or JSON array) to customize allowed origins. You may also set `FRONTEND_ORIGIN` for a single origin.
+Effective configuration (hardcoded as requested):
+- Allowed origins:
+  - `https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000`
+  - `http://localhost:3000`
+- Allow credentials: `true`
+- Allowed methods: `GET, POST, PUT, DELETE, PATCH, OPTIONS`
+- Allowed headers: `Authorization, Content-Type, X-Correlation-ID, X-Requested-With`
+- Exposed headers: `X-Correlation-ID`
+- `Vary: Origin` is added to all responses.
+- A minimal safety-net route (`OPTIONS /{path:path}`) returns 200 with proper CORS headers for allowed origins (including `/auth/signup`).
 
 Verification steps:
 1) Start API: `uvicorn src.api.main:app --reload --host 0.0.0.0 --port 3001`
-2) Preflight: 
+2) Preflight:
    ```
    curl -i -X OPTIONS http://localhost:3001/auth/signup \
      -H "Origin: https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000" \
@@ -104,12 +102,11 @@ Verification steps:
    - `Vary: Origin`
 
 Notes:
-- You can set `CORS_ORIGINS` or `FRONTEND_ORIGIN` in `.env` to override defaults. See `.env.example`.
-- If running behind a proxy, `ProxyHeadersMiddleware` supports `X-Forwarded-*` headers; `TrustedHostMiddleware` allowed hosts are derived from `TRUSTED_HOSTS` or `*` in dev.
+- If running behind a proxy, `ProxyHeadersMiddleware` supports `X-Forwarded-*` headers; `TrustedHostMiddleware` accepts all hosts in this dev setup to avoid startup issues.
 - Make sure your frontend uses the exact Origin (scheme + host + port) listed in allowed origins.
 
 TODO:
-- For production, prefer environment-based configuration using `CORS_ORIGINS` and remove reliance on hardcoded fallback defaults in `src/api/main.py`.
+- For production, move CORS allowlist back to environment-driven configuration and restrict TrustedHost allowed_hosts appropriately.
 
 ## Migrations
 
