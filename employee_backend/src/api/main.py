@@ -95,6 +95,7 @@ def _compute_trusted_hosts_patterns(sources: List[str]) -> List[str]:
     return patterns or ["*"]
 
 trusted_hosts_patterns = _compute_trusted_hosts_patterns(settings.trusted_hosts)
+# TrustedHostMiddleware requires host patterns (no schemes/ports). In development we allow "*".
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts_patterns)
 
 
@@ -231,6 +232,9 @@ def _compute_cors_allow_origins() -> List[str]:
 
 
 # Effective CORS settings
+# Must be non-empty and include both preview frontend and localhost in fallback:
+# - https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000
+# - http://localhost:3000
 CORS_ALLOW_ORIGINS: List[str] = _compute_cors_allow_origins()
 CORS_ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 CORS_ALLOW_HEADERS: List[str] = ["Authorization", "Content-Type", "X-Correlation-ID", "X-Requested-With"]
@@ -238,6 +242,8 @@ CORS_EXPOSE_HEADERS: List[str] = ["X-Correlation-ID"]
 
 # Middleware ordering must remain:
 # ProxyHeaders -> TrustedHost -> CORS -> Correlation -> Routers
+# Note: CORSMiddleware automatically adds the appropriate CORS headers for both
+# preflight and actual requests. We explicitly set allow/expose headers and methods.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOW_ORIGINS,
@@ -275,6 +281,23 @@ app.add_middleware(CorrelationIdMiddleware)
 app.include_router(auth_router.router)
 app.include_router(employees_router.router)
 app.include_router(dashboard_router.router)
+
+# Ensure all responses include Vary: Origin so caches handle per-origin responses safely.
+# CORSMiddleware should do this, but this hook guarantees it across runtime variations.
+@app.middleware("http")
+async def add_vary_origin_header(request: Request, call_next):
+    response = await call_next(request)
+    try:
+        vary_val = response.headers.get("Vary")
+        if vary_val:
+            if "Origin" not in [v.strip() for v in vary_val.split(",")]:
+                response.headers["Vary"] = vary_val + ", Origin"
+        else:
+            response.headers["Vary"] = "Origin"
+    except Exception:
+        # Do not fail response path for header adjustments
+        pass
+    return response
 
 
 def _derive_frontend_origin_from_request(request: Request) -> Optional[str]:
@@ -320,6 +343,9 @@ def cors_preflight_fallback(path: str, request: Request) -> Response:
       the correct CORS headers when the origin is allowed. It uses the same
       allowlist configured for CORSMiddleware, plus a best-effort derived origin
       for :3001 -> :3000 paired host setups.
+    - Returns 200 with Access-Control-Allow-Origin, -Methods, -Headers, and
+      Access-Control-Allow-Credentials for allowed origins, and includes
+      Vary: Origin as required by the acceptance criteria.
     """
     origin = request.headers.get("origin")
     acr_headers = request.headers.get("access-control-request-headers", "")
