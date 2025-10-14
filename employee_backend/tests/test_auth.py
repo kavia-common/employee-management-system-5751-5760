@@ -67,6 +67,7 @@ def test_signup_login_me_flow(client: TestClient):
     assert r3.status_code == 200, r3.text
     token = r3.json()["access_token"]
     assert token
+    assert r3.json().get("token_type") == "bearer"
     # Ensure correlation header exists on success responses as well
     assert r3.headers.get("X-Correlation-ID")
 
