@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.api.main import app
 from src.db.base import Base
 from src.db.session import get_db
+from src.core.security import decode_access_token
 
 
 @pytest.fixture(scope="function")
@@ -168,6 +169,9 @@ def test_cors_post_login_success_includes_headers(client: TestClient):
     )
     assert r.status_code == 200, r.text
     assert r.headers.get("access-control-allow-origin") == origin
+    # Ensure Vary includes Origin as per acceptance criteria
+    vary = r.headers.get("vary", "")
+    assert "origin" in vary.lower()
     expose = r.headers.get("access-control-expose-headers", "")
     assert "X-Correlation-ID" in expose
     # Correlation header present on success responses
@@ -219,3 +223,27 @@ def test_login_validation_error_returns_422_with_cors(client: TestClient):
     body = r.json()
     assert "error" in body and body["error"]["code"] == 422
     assert r.headers.get("X-Correlation-ID")
+
+
+def test_login_response_token_shape(client: TestClient):
+    """
+    Login success should return a JSON object containing:
+      - access_token: string (non-empty JWT)
+      - token_type: 'bearer'
+    And the JWT should decode with expected claims including 'sub', 'iat' and 'exp'.
+    """
+    email = "shape@example.com"
+    password = "StrongPass123"
+    # Ensure user exists
+    client.post("/auth/signup", json={"email": email, "password": password})
+    # Login
+    r = client.post("/auth/login", json={"email": email, "password": password})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Assert token shape
+    assert isinstance(body.get("access_token"), str) and body["access_token"]
+    assert body.get("token_type") == "bearer"
+    # Decode and assert essential claims exist
+    payload = decode_access_token(body["access_token"])
+    assert "sub" in payload and payload["sub"]
+    assert "iat" in payload and "exp" in payload
