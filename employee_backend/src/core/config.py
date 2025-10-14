@@ -133,6 +133,20 @@ class Settings:
         default=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     )
 
+    def __post_init__(self):
+        """
+        Validate critical security configuration at startup.
+        Fail fast if JWT_SECRET is not configured to a non-placeholder value.
+        """
+        # In tests or certain tooling contexts, raising here immediately surfaces misconfiguration.
+        # Do not allow the insecure placeholder.
+        placeholder = "CHANGE_ME_IN_ENV"
+        if not self.jwt_secret or self.jwt_secret == placeholder:
+            # Raise a clear error that instructs operators to set JWT_SECRET in environment/.env
+            raise RuntimeError(
+                "JWT_SECRET is not configured. Set a secure random value in environment (.env for dev)."
+            )
+
 
 # PUBLIC_INTERFACE
 def get_settings() -> Settings:
