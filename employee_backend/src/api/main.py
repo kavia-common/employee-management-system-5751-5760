@@ -18,6 +18,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from src.core.config import settings
 from src.core.logging_config import setup_logging
@@ -43,6 +45,17 @@ app = FastAPI(
     openapi_tags=openapi_tags,
 )
 
+# Middleware ordering:
+# - ProxyHeadersMiddleware: respect X-Forwarded-* when behind a proxy/load balancer
+# - TrustedHostMiddleware: restrict allowed Host headers (defense in depth)
+# - CORSMiddleware: must be added before routers to handle preflight
+# - CorrelationIdMiddleware: tracing and logging
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")  # starlette uses this to parse forwarded headers
+
+# Trusted hosts from settings; default is permissive in dev
+trusted_hosts = settings.trusted_hosts or ["*"]
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
+
 # CORS configuration from environment
 # Use explicit origins; never use "*" with allow_credentials=True.
 # If CORS_ORIGINS is empty and we're in development, use safe defaults.
@@ -51,19 +64,24 @@ dev_default_origins: List[str] = [
     "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000",
 ]
 allow_origins: List[str] = settings.cors_origins or (dev_default_origins if settings.env == "development" else [])
+
+# Per requirements: explicit allow methods/headers
+allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+allow_headers = ["Authorization", "Content-Type", "X-Correlation-ID"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    allow_credentials=True,  # consistent with frontend usage (cookies or auth headers)
+    allow_methods=allow_methods,
+    allow_headers=allow_headers,
     expose_headers=["X-Correlation-ID"],
 )
 
 # Log configured CORS origins at startup (no PII)
 @app.on_event("startup")
 async def _log_cors_config() -> None:
-    logger.info("CORS configured for origins %s", allow_origins)
+    logger.info("CORS configured", extra={"origins": allow_origins, "methods": allow_methods, "headers": allow_headers, "trusted_hosts": trusted_hosts})
 
 # Install correlation ID middleware
 app.add_middleware(CorrelationIdMiddleware)

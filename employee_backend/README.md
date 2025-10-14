@@ -63,9 +63,10 @@ See `.env.example` for a template.
   - `http://localhost:3000`
   - `https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000`
 - Do not use wildcard `*` with credentials; the backend is configured with `allow_credentials=True` and explicit origins only.
-- Allowed methods: `GET, POST, PUT, DELETE, OPTIONS`
-- Allowed headers: `*`
+- Allowed methods: `GET, POST, PUT, DELETE, OPTIONS, PATCH`
+- Allowed headers: `Authorization, Content-Type, X-Correlation-ID`
 - Exposed headers: `X-Correlation-ID` (so clients can read the correlation ID from responses)
+- The backend emits `Vary: Origin` to ensure proper caching semantics for CORS.
 - Preflight (OPTIONS) requests are handled automatically by the CORS middleware.
 
 ## Migrations

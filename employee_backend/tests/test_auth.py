@@ -101,6 +101,9 @@ def test_cors_preflight_signup(client: TestClient):
     r = client.options("/auth/signup", headers=headers)
     assert r.status_code in (200, 204)
     assert r.headers.get("access-control-allow-origin") == origin
+    vary = r.headers.get("vary", "")
+    # Starlette sets Vary to include Origin for CORS handling
+    assert "origin" in vary.lower()
 
 
 def test_cors_post_signup_includes_headers(client: TestClient):
@@ -115,3 +118,5 @@ def test_cors_post_signup_includes_headers(client: TestClient):
     assert r.headers.get("access-control-allow-origin") == origin
     expose = r.headers.get("access-control-expose-headers", "")
     assert "X-Correlation-ID" in expose
+    vary = r.headers.get("vary", "")
+    assert "origin" in vary.lower()
