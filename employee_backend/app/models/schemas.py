@@ -12,7 +12,7 @@ from datetime import date
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 
 class EmployeeStatus(str, Enum):
@@ -26,7 +26,9 @@ class EmployeeStatus(str, Enum):
 class LoginRequest(BaseModel):
     """Login request payload. [STUB]"""
 
-    email: EmailStr = Field(..., description="Login email")
+    # Note: Using plain str to avoid optional email_validator dependency.
+    # Basic email shape validation can be added client-side; server enforces only type/length here.
+    email: str = Field(..., min_length=3, max_length=254, description="Login email")
     password: str = Field(..., min_length=6, max_length=128, description="Login password (min 6 chars)")
 
 
@@ -34,7 +36,7 @@ class LoginRequest(BaseModel):
 class SignupRequest(BaseModel):
     """Signup request payload. [STUB]"""
 
-    email: EmailStr = Field(..., description="Unique email address")
+    email: str = Field(..., min_length=3, max_length=254, description="Unique email address")
     password: str = Field(..., min_length=6, max_length=128, description="Password (min 6 chars)")
 
 
@@ -44,7 +46,7 @@ class EmployeeCreate(BaseModel):
 
     first_name: str = Field(..., min_length=1, max_length=120, description="First name")
     last_name: str = Field(..., min_length=1, max_length=120, description="Last name")
-    email: EmailStr = Field(..., description="Unique email")
+    email: str = Field(..., min_length=3, max_length=254, description="Unique email")
     phone: Optional[str] = Field(None, max_length=32, description="Phone number")
     department: Optional[str] = Field(None, max_length=120, description="Department")
     title: Optional[str] = Field(None, max_length=120, description="Job title")
@@ -60,7 +62,7 @@ class EmployeeUpdate(BaseModel):
 
     first_name: Optional[str] = Field(None, min_length=1, max_length=120)
     last_name: Optional[str] = Field(None, min_length=1, max_length=120)
-    email: Optional[EmailStr] = None
+    email: Optional[str] = Field(None, min_length=3, max_length=254)
     phone: Optional[str] = Field(None, max_length=32)
     department: Optional[str] = Field(None, max_length=120)
     title: Optional[str] = Field(None, max_length=120)
@@ -77,7 +79,7 @@ class EmployeeOut(BaseModel):
     id: int
     first_name: str
     last_name: str
-    email: EmailStr
+    email: str
     phone: Optional[str] = None
     department: Optional[str] = None
     title: Optional[str] = None

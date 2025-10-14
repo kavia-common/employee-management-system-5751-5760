@@ -4,6 +4,7 @@ Employees router [STUB].
 This module preserves the employees API surface while providing in-memory
 CRUD operations with deterministic seed data. It supports:
 - List with pagination (page, page_size) and simple filter by 'q'
+- Also supports aliases: size (for page_size) and search (for q)
 - Create (unique email)
 - Read by ID
 - Update
@@ -37,17 +38,22 @@ def list_employees(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(10, ge=1, le=100, description="Page size"),
     q: Optional[str] = Query(None, description="Search term (name or email contains)"),
+    # Aliases for compatibility with other clients/specs
+    size: Optional[int] = Query(None, ge=1, le=100, alias="size", description="Alias of page_size"),
+    search: Optional[str] = Query(None, alias="search", description="Alias of q"),
 ) -> PaginatedEmployees:
     """Return a paginated list of employees using in-memory data. [STUB]"""
-    results = store.search_employees(query=q or "")
+    effective_size = size if size is not None else page_size
+    effective_query = search if (search is not None and search != "") else (q or "")
+    results = store.search_employees(query=effective_query)
     total = len(results)
-    start = (page - 1) * page_size
-    end = start + page_size
+    start = (page - 1) * effective_size
+    end = start + effective_size
     page_items = results[start:end]
-    pages = (total + page_size - 1) // page_size if page_size else 1
+    pages = (total + effective_size - 1) // effective_size if effective_size else 1
     return PaginatedEmployees(
         data=[EmployeeOut(**e) for e in page_items],
-        pagination={"total": total, "page": page, "page_size": page_size, "pages": pages or 1},
+        pagination={"total": total, "page": page, "page_size": effective_size, "pages": pages or 1},
     )
 
 

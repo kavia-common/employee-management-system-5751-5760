@@ -1,28 +1,26 @@
-# Employee Backend [STUB]
+# Employee Backend [STUB] - Preview Connectivity Notes
 
-This is a no-dependency stub backend for local development previews. It preserves the REST API structure but replaces business logic, database, and authentication with an in-memory mock store.
+This is a stubbed FastAPI backend intended for frontend preview and integration without database/auth dependencies.
 
-Key points:
-- No database or ORM; all data is stored in memory for the process lifetime.
-- No real authentication; login returns a deterministic fake token.
-- CORS enabled for http://localhost:3000.
-- OpenAPI docs clearly mark endpoints as [STUB] via descriptions/tags.
+Key behavior:
+- CORS: allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"], expose_headers=["X-Correlation-ID"]
+- Health: GET /health returns {"status":"ok"}
+- Docs: /docs
+- Routers: /auth (signup, login, logout, me), /employees (list/create/read/update/delete)
+- Errors: standardized JSON envelope {"error":{"code": <int>, "message": "<str>", "correlationId": "<uuid>"}}
 
 Run locally:
-uvicorn app.main:app --host 0.0.0.0 --port 3001
+- uvicorn app.main:app --host 0.0.0.0 --port 3001
+- The app also includes a __main__ guard that binds to 0.0.0.0:3001 by default if launched as a script.
 
-Endpoints:
-- GET /health
-- POST /auth/signup
-- POST /auth/login
-- POST /auth/logout
-- GET /employees?page=<int>&page_size=<int>&q=<string>
-- POST /employees
-- GET /employees/{id}
-- PUT /employees/{id}
-- DELETE /employees/{id}
+Frontend preview defaults:
+- Point API base to http://localhost:3001 (or override with window.__API_BASE__ / REACT_APP_API_BASE if available).
+
+Acceptance checks:
+- GET http://localhost:3001/health -> 200 {"status":"ok"}
+- /docs loads
+- Preflight OPTIONS and CRUD from http://localhost:3000 succeed (wildcard CORS enabled).
 
 Notes:
-- The data resets on server restart.
-- No environment variables are required.
-- This stub is intended for UI development and contract validation only. Do not use in production.
+- This stub avoids any DB drivers or environment dependencies.
+- Email validation is minimal (string type) to keep requirements small.
