@@ -28,8 +28,8 @@ def signup_user(db: Session, email: str, password: str, full_name: Optional[str]
         user = create_user(db, email=email, password_hash=password_hash, full_name=full_name)
         return user
     except EmailAlreadyExistsError:
-        # Do not log email (PII)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+        # Do not log email (PII). Return 409 Conflict per acceptance criteria.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
 
 # PUBLIC_INTERFACE

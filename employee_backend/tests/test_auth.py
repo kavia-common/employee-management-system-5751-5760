@@ -57,9 +57,9 @@ def test_signup_login_me_flow(client: TestClient):
     assert data["email"] == payload["email"]
     assert "id" in data and data["is_active"] is True
 
-    # Duplicate signup should fail
+    # Duplicate signup should fail with 409 Conflict
     r2 = client.post("/auth/signup", json=payload)
-    assert r2.status_code == 400
+    assert r2.status_code == 409
     assert "error" in r2.json()
 
     # Login
@@ -114,7 +114,7 @@ def test_cors_post_signup_includes_headers(client: TestClient):
     origin = "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000"
     payload = {"email": "cors@example.com", "password": "StrongPass123"}
     r = client.post("/auth/signup", json=payload, headers={"Origin": origin})
-    # 201 on first run; if re-run, may return 400 (duplicate). We only check CORS headers.
+    # 201 on first run; if re-run, may return 409 (duplicate). We only check CORS headers.
     assert r.headers.get("access-control-allow-origin") == origin
     expose = r.headers.get("access-control-expose-headers", "")
     assert "X-Correlation-ID" in expose
