@@ -292,3 +292,32 @@ def test_login_invalid_credentials_401_with_cors(client: TestClient):
     assert "origin" in (vary or "").lower()
     # Correlation header should be present
     assert r.headers.get("X-Correlation-ID")
+
+
+def test_login_subject_matches_user_id(client: TestClient):
+    """
+    Successful login returns a JWT whose 'sub' claim matches the created user's ID string,
+    and the response content-type and token shape are correct.
+    """
+    email = "subject_check@example.com"
+    password = "StrongPass123"
+
+    # Arrange: create user and capture user ID
+    r_signup = client.post("/auth/signup", json={"email": email, "password": password})
+    assert r_signup.status_code == 201, r_signup.text
+    user_id = r_signup.json().get("id")
+    assert isinstance(user_id, int) and user_id > 0
+
+    # Act: login
+    r_login = client.post("/auth/login", json={"email": email, "password": password})
+    assert r_login.status_code == 200, r_login.text
+    # Assert: content-type is application/json
+    assert r_login.headers.get("content-type", "").lower().startswith("application/json")
+    body = r_login.json()
+    token = body.get("access_token")
+    assert isinstance(token, str) and token.strip() != ""
+    assert body.get("token_type") == "bearer"
+
+    # Assert: decoded token subject equals created user ID (string)
+    claims = decode_access_token(token)
+    assert claims.get("sub") == str(user_id)
