@@ -188,3 +188,33 @@ def test_duplicate_signup_returns_409_with_cors(client: TestClient):
     body = r2.json()
     assert "error" in body and body["error"]["code"] == 409
     assert r2.headers.get("X-Correlation-ID")
+
+
+def test_signup_validation_error_returns_422_with_cors(client: TestClient):
+    """
+    Invalid signup payload (missing password) should return 422 and include CORS headers, not 500.
+    """
+    origin = "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000"
+    r = client.post("/auth/signup", json={"email": "bad@example.com"}, headers={"Origin": origin})
+    assert r.status_code == 422
+    assert r.headers.get("access-control-allow-origin") == origin
+    body = r.json()
+    assert "error" in body and body["error"]["code"] == 422
+    assert r.headers.get("X-Correlation-ID")
+
+
+def test_login_validation_error_returns_422_with_cors(client: TestClient):
+    """
+    Invalid login payload (password too short) should return 422 and include CORS headers.
+    """
+    origin = "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000"
+    r = client.post(
+        "/auth/login",
+        json={"email": "user@example.com", "password": "short"},
+        headers={"Origin": origin},
+    )
+    assert r.status_code == 422
+    assert r.headers.get("access-control-allow-origin") == origin
+    body = r.json()
+    assert "error" in body and body["error"]["code"] == 422
+    assert r.headers.get("X-Correlation-ID")

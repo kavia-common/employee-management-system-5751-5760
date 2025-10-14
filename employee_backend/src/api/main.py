@@ -137,6 +137,24 @@ def _core_tables_present() -> bool:
         return False
 
 
+def _self_test_password_hashing() -> None:
+    """
+    Perform a lightweight self-test of password hashing/verification to ensure
+    passlib[bcrypt] is available at runtime. Logs errors but does not prevent startup.
+    """
+    try:
+        # Lazy import to avoid any potential circular imports at import time
+        from src.core.security import hash_password, verify_password  # type: ignore
+        test_pw = "self-test-password"
+        hashed = hash_password(test_pw)
+        if not verify_password(test_pw, hashed):
+            raise RuntimeError("Password verification failed during self-test.")
+        logger.info("Password hashing self-test passed (bcrypt available).")
+    except Exception:
+        logger.exception(
+            "Password hashing self-test failed; ensure 'passlib[bcrypt]' is installed and functional."
+        )
+
 # PUBLIC_INTERFACE
 @app.on_event("startup")
 async def ensure_database_ready_on_startup() -> None:
@@ -147,12 +165,16 @@ async def ensure_database_ready_on_startup() -> None:
     the service is started without first running migrations.
     """
     if _core_tables_present():
+        # Still perform security self-test to catch missing bcrypt early
+        _self_test_password_hashing()
         return
     logger.warning("Core tables missing at startup. Attempting to apply migrations...")
     _ensure_alembic_upgrade_head()
     # Recheck and log outcome
     if not _core_tables_present():
         logger.error("Database still missing core tables after migration attempt.")
+    # Always perform security self-test
+    _self_test_password_hashing()
 
 
 # ---------------------------------------------------------------------------
