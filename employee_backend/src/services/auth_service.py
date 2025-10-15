@@ -23,8 +23,18 @@ bearer_scheme = HTTPBearer(auto_error=False)
 # PUBLIC_INTERFACE
 def signup_user(db: Session, email: str, password: str, full_name: Optional[str] = None):
     """Create a new user ensuring uniqueness."""
+    # Hashing may fail if bcrypt backend is unavailable or misconfigured.
     try:
         password_hash = hash_password(password)
+    except Exception:
+        # Log without sensitive details and return standardized server error.
+        logger.exception("Password hashing failed during signup")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
+
+    try:
         user = create_user(db, email=email, password_hash=password_hash, full_name=full_name)
         return user
     except EmailAlreadyExistsError:

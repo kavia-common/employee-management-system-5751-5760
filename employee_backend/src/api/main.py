@@ -40,6 +40,7 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.openapi.utils import get_openapi
 from sqlalchemy import inspect
 from sqlalchemy.exc import OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -74,16 +75,63 @@ app = FastAPI(
 # (TrustedHost and ProxyHeaders temporarily removed to stabilize startup)
 # ---------------------------------------------------------------------------
 
-# Definitive CORS settings per request
-CORS_ALLOW_ORIGINS: List[str] = [
-    "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000",
-    "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3002",
+# CORS configuration (environment-driven with safe defaults)
+
+
+def _parse_origins_env(value: str) -> List[str]:
+    """
+    Parse CORS origins from environment.
+    Supports JSON array or comma-separated list.
+    """
+    if not value:
+        return []
+    raw = value.strip()
+    parsed: List[str] = []
+    # Try JSON array
+    if raw.startswith("[") and raw.endswith("]"):
+        try:
+            import json as _json  # local import to keep top-level imports tidy
+            arr = _json.loads(raw)
+            if isinstance(arr, list):
+                parsed = [str(x).strip() for x in arr if str(x).strip()]
+        except Exception:
+            parsed = []
+    if not parsed:
+        parsed = [p.strip() for p in raw.split(",") if p.strip()]
+
+    # Normalize origins: trim trailing slash and lowercase for comparison
+
+    def _normalize(o: str) -> str:
+        o = o.strip()
+        if o.endswith("/"):
+            o = o[:-1]
+        return o.lower()
+    result: List[str] = []
+    seen = set()
+    for item in parsed:
+        norm = _normalize(item)
+        if norm and norm not in seen:
+            seen.add(norm)
+            result.append(norm)
+    return result
+
+
+# Defaults to cover preview and localhost dev
+DEFAULT_ALLOWED_ORIGINS: List[str] = [
+    "https://vscode-internal-23063-beta.beta01.cloud.kavia.ai:3000",
     "http://localhost:3000",
-    "http://localhost:3002",
 ]
-CORS_ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
-CORS_ALLOW_HEADERS: List[str] = ["Authorization", "Content-Type", "X-Correlation-ID", "X-Requested-With"]
-CORS_EXPOSE_HEADERS: List[str] = ["X-Correlation-ID"]
+
+# Prefer ALLOWED_ORIGINS; fall back to legacy CORS_ORIGINS; else defaults.
+_env_origins_raw = os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS") or ""
+_env_origins = _parse_origins_env(_env_origins_raw)
+CORS_ALLOW_ORIGINS: List[str] = _env_origins if _env_origins else DEFAULT_ALLOWED_ORIGINS
+
+# Use permissive wildcard for methods/headers; preflight safety route will reflect request.
+CORS_ALLOW_METHODS: List[str] = ["*"]
+CORS_ALLOW_HEADERS: List[str] = ["*"]
+# Expose correlation header to clients (include both common casings)
+CORS_EXPOSE_HEADERS: List[str] = ["X-Correlation-ID", "X-Correlation-Id"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -101,6 +149,83 @@ app.add_middleware(CorrelationIdMiddleware)
 app.include_router(auth_router.router)
 app.include_router(employees_router.router)
 app.include_router(dashboard_router.router)
+
+# ---------------------------------------------------------------------------
+# OpenAPI / Swagger security: Inject HTTP Bearer (JWT) scheme and mark protected routes
+# ---------------------------------------------------------------------------
+
+
+def custom_openapi() -> dict:
+    """
+    Generate the OpenAPI schema and inject a reusable HTTP Bearer (JWT) security scheme.
+
+    Why:
+    - Ensure Swagger UI shows the Authorize button with a bearer token input.
+    - Add bearerFormat: JWT for clarity in the UI and client generators.
+    - Ensure protected endpoints (e.g., /auth/me, Employees, Dashboard) explicitly
+      declare the security requirement so Swagger shows the lock icon and applies
+      Authorization: Bearer <token> automatically after authorization.
+    """
+    # If already generated, return the cached schema
+    if getattr(app, "openapi_schema", None):
+        return app.openapi_schema  # type: ignore[attr-defined]
+
+    # Build the base schema from FastAPI introspection of routes and tags
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+        tags=openapi_tags,
+    )
+
+    # Ensure components.securitySchemes exists and contains HTTPBearer with bearerFormat: JWT
+    components = openapi_schema.setdefault("components", {})
+    security_schemes = components.setdefault("securitySchemes", {})
+    scheme_name = "HTTPBearer"
+
+    existing_scheme = security_schemes.get(scheme_name)
+    if existing_scheme:
+        # Normalize/augment existing definition
+        existing_scheme.setdefault("type", "http")
+        existing_scheme.setdefault("scheme", "bearer")
+        existing_scheme["bearerFormat"] = "JWT"
+    else:
+        # Define the HTTP bearer scheme with JWT format
+        security_schemes[scheme_name] = {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+
+    # Ensure protected operations declare security.
+    # We avoid setting global security so that public endpoints like /auth/login remain open.
+    try:
+        protected_tags = {"Employees", "Dashboard"}
+        for path, methods in (openapi_schema.get("paths") or {}).items():
+            if not isinstance(methods, dict):
+                continue
+            for method, operation in methods.items():
+                if not isinstance(operation, dict):
+                    continue
+                # If already has security, do not override
+                if isinstance(operation.get("security"), list):
+                    continue
+
+                tags = set(operation.get("tags") or [])
+                # Add security for Employees/Dashboard endpoints and specifically for /auth/me
+                if (tags & protected_tags) or path == "/auth/me":
+                    operation["security"] = [{scheme_name: []}]
+    except Exception:
+        # Never fail OpenAPI generation due to schema patching; docs should still render.
+        pass
+
+    app.openapi_schema = openapi_schema  # type: ignore[attr-defined]
+    return app.openapi_schema  # type: ignore[attr-defined]
+
+
+# Assign our custom OpenAPI generator so /docs and openapi.json use the patched schema.
+app.openapi = custom_openapi  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Startup database check & auto-migration
@@ -312,44 +437,49 @@ def cors_preflight_fallback(path: str, request: Request) -> Response:
     """
     Minimal fallback handler for CORS preflight requests.
 
-    CORSMiddleware should handle OPTIONS before routing. This route ensures that,
-    if OPTIONS reaches routing, the response still includes expected headers
-    for allowed origins.
-
-    Returns 200 with:
-      - Access-Control-Allow-Origin (echoed origin if allowed)
-      - Access-Control-Allow-Methods (configured list)
-      - Access-Control-Allow-Headers (intersection or configured list)
-      - Access-Control-Allow-Credentials: true
-      - Access-Control-Max-Age
-      - Vary: Origin
+    Notes:
+    - CORSMiddleware should handle OPTIONS automatically. This route is a safety net to ensure
+      that if an OPTIONS request reaches routing, proper CORS headers are still returned.
+    - No authentication is performed for preflight requests.
     """
     origin = request.headers.get("origin")
     acr_headers = request.headers.get("access-control-request-headers", "")
+    acr_method = request.headers.get("access-control-request-method", "")
     resp = Response(status_code=200)
 
-    # Always ensure Vary: Origin is set for caches
+    # Always ensure Vary: Origin is set for caches/proxies
     vary_val = resp.headers.get("Vary")
     resp.headers["Vary"] = (vary_val + ", Origin") if vary_val and "Origin" not in vary_val else "Origin"
 
-    # Normalize for comparison
     if _is_origin_allowed(origin):
         # Mirror origin if allowed
         resp.headers["Access-Control-Allow-Origin"] = origin
-        resp.headers["Access-Control-Allow-Methods"] = ", ".join(CORS_ALLOW_METHODS)
 
-        requested = [h.strip() for h in acr_headers.split(",") if h.strip()]
-        allowed_lower = [h.lower() for h in CORS_ALLOW_HEADERS]
-        if requested:
-            # Case-insensitive intersection; if none, return configured list
-            intersection: list[str] = []
-            for h in requested:
-                if h.lower() in allowed_lower and h not in intersection:
-                    intersection.append(h)
-            allow_headers_value = ", ".join(intersection) if intersection else ", ".join(CORS_ALLOW_HEADERS)
+        # Allow-Methods: echo requested method if wildcard; else join configured list
+        methods_wildcard = any(m.strip() == "*" for m in CORS_ALLOW_METHODS)
+        if methods_wildcard:
+            resp.headers["Access-Control-Allow-Methods"] = acr_method or "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         else:
-            allow_headers_value = ", ".join(CORS_ALLOW_HEADERS)
-        resp.headers["Access-Control-Allow-Headers"] = allow_headers_value
+            resp.headers["Access-Control-Allow-Methods"] = ", ".join(CORS_ALLOW_METHODS)
+
+        # Allow-Headers: if wildcard, echo requested headers or '*'
+        headers_wildcard = any(h.strip() == "*" for h in CORS_ALLOW_HEADERS)
+        if headers_wildcard:
+            resp.headers["Access-Control-Allow-Headers"] = acr_headers or "*"
+        else:
+            requested = [h.strip() for h in acr_headers.split(",") if h.strip()]
+            allowed_lower = [h.lower() for h in CORS_ALLOW_HEADERS]
+            if requested:
+                # Case-insensitive intersection; if none, return configured list
+                intersection: list[str] = []
+                for h in requested:
+                    if h.lower() in allowed_lower and h not in intersection:
+                        intersection.append(h)
+                allow_headers_value = ", ".join(intersection) if intersection else ", ".join(CORS_ALLOW_HEADERS)
+            else:
+                allow_headers_value = ", ".join(CORS_ALLOW_HEADERS)
+            resp.headers["Access-Control-Allow-Headers"] = allow_headers_value
+
         resp.headers["Access-Control-Allow-Credentials"] = "true"
         resp.headers["Access-Control-Max-Age"] = "600"
 
@@ -417,6 +547,20 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 def health_check() -> Dict[str, str]:
     """Return a basic health status response."""
     return {"message": "Healthy"}
+
+
+@app.get(
+    "/health",
+    summary="Health Check (standard)",
+    description="Simple health endpoint returning {'status':'ok'} for monitoring tools.",
+    tags=["Health"],
+)
+# PUBLIC_INTERFACE
+def health_standard() -> Dict[str, str]:
+    """
+    Provide a conventional health endpoint returning a simple status payload.
+    """
+    return {"status": "ok"}
 
 
 @app.get(
