@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from src.models.employee import Employee, EmployeeStatus
 from src.repositories.employee_repository import (
     EmployeeEmailAlreadyExistsError,
+    InvalidSortError,
     create_employee,
     delete_employee,
     get_employee,
@@ -29,9 +30,21 @@ def list_employee_records(
     search: Optional[str] = None,
     department: Optional[str] = None,
     status: Optional[EmployeeStatus] = None,
+    sort: Optional[str] = None,
 ) -> Tuple[list[Employee], int, int, int]:
     """Return employees and pagination meta (total, page, pages)."""
-    rows, total = list_employees(db, page=page, size=size, search=search, department=department, status=status)
+    try:
+        rows, total = list_employees(
+            db,
+            page=page,
+            size=size,
+            search=search,
+            department=department,
+            status=status,
+            sort=sort,
+        )
+    except InvalidSortError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     total_pages = ceil(total / size) if size else 1
     return rows, total, page, total_pages
 

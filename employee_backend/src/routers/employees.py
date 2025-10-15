@@ -38,9 +38,17 @@ router = APIRouter(prefix="/employees", tags=["Employees"])
 def list_employees_api(
     page: int = Query(1, ge=1),
     size: int = Query(10, ge=1, le=100),
-    search: str | None = Query(None),
-    department: str | None = Query(None),
-    status_filter: EmployeeStatus | None = Query(None, alias="status"),
+    search: str | None = Query(None, description="Search term applied to first/last name or email"),
+    department: str | None = Query(None, description="Filter by department"),
+    status_filter: EmployeeStatus | None = Query(None, alias="status", description="Filter by employment status"),
+    sort: str | None = Query(
+        None,
+        description=(
+            "Sort order. Examples: 'last_name', 'last_name:desc', '-date_hired'. "
+            "Allowed fields: id, first_name, last_name, email, department, title, "
+            "salary, date_hired, status, created_at, updated_at. Defaults to '-id'."
+        ),
+    ),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -59,9 +67,17 @@ def list_employees_api(
         Department filter
     status : EmployeeStatus | None
         Status filter (ACTIVE/INACTIVE)
+    sort : str | None
+        Sort specifier, e.g., 'last_name:asc' or '-date_hired'. Defaults to '-id'.
     """
     rows, total, page_num, pages = list_employee_records(
-        db, page=page, size=size, search=search, department=department, status=status_filter
+        db,
+        page=page,
+        size=size,
+        search=search,
+        department=department,
+        status=status_filter,
+        sort=sort,
     )
     data = [EmployeeRead.model_validate(r) for r in rows]
     return EmployeeListResponse(
