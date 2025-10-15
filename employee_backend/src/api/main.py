@@ -40,6 +40,7 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.openapi.utils import get_openapi
 from sqlalchemy import inspect
 from sqlalchemy.exc import OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -101,6 +102,83 @@ app.add_middleware(CorrelationIdMiddleware)
 app.include_router(auth_router.router)
 app.include_router(employees_router.router)
 app.include_router(dashboard_router.router)
+
+# ---------------------------------------------------------------------------
+# OpenAPI / Swagger security: Inject HTTP Bearer (JWT) scheme and mark protected routes
+# ---------------------------------------------------------------------------
+
+
+def custom_openapi() -> dict:
+    """
+    Generate the OpenAPI schema and inject a reusable HTTP Bearer (JWT) security scheme.
+
+    Why:
+    - Ensure Swagger UI shows the Authorize button with a bearer token input.
+    - Add bearerFormat: JWT for clarity in the UI and client generators.
+    - Ensure protected endpoints (e.g., /auth/me, Employees, Dashboard) explicitly
+      declare the security requirement so Swagger shows the lock icon and applies
+      Authorization: Bearer <token> automatically after authorization.
+    """
+    # If already generated, return the cached schema
+    if getattr(app, "openapi_schema", None):
+        return app.openapi_schema  # type: ignore[attr-defined]
+
+    # Build the base schema from FastAPI introspection of routes and tags
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+        tags=openapi_tags,
+    )
+
+    # Ensure components.securitySchemes exists and contains HTTPBearer with bearerFormat: JWT
+    components = openapi_schema.setdefault("components", {})
+    security_schemes = components.setdefault("securitySchemes", {})
+    scheme_name = "HTTPBearer"
+
+    existing_scheme = security_schemes.get(scheme_name)
+    if existing_scheme:
+        # Normalize/augment existing definition
+        existing_scheme.setdefault("type", "http")
+        existing_scheme.setdefault("scheme", "bearer")
+        existing_scheme["bearerFormat"] = "JWT"
+    else:
+        # Define the HTTP bearer scheme with JWT format
+        security_schemes[scheme_name] = {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+
+    # Ensure protected operations declare security.
+    # We avoid setting global security so that public endpoints like /auth/login remain open.
+    try:
+        protected_tags = {"Employees", "Dashboard"}
+        for path, methods in (openapi_schema.get("paths") or {}).items():
+            if not isinstance(methods, dict):
+                continue
+            for method, operation in methods.items():
+                if not isinstance(operation, dict):
+                    continue
+                # If already has security, do not override
+                if isinstance(operation.get("security"), list):
+                    continue
+
+                tags = set(operation.get("tags") or [])
+                # Add security for Employees/Dashboard endpoints and specifically for /auth/me
+                if (tags & protected_tags) or path == "/auth/me":
+                    operation["security"] = [{scheme_name: []}]
+    except Exception:
+        # Never fail OpenAPI generation due to schema patching; docs should still render.
+        pass
+
+    app.openapi_schema = openapi_schema  # type: ignore[attr-defined]
+    return app.openapi_schema  # type: ignore[attr-defined]
+
+
+# Assign our custom OpenAPI generator so /docs and openapi.json use the patched schema.
+app.openapi = custom_openapi  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Startup database check & auto-migration
