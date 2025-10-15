@@ -44,11 +44,16 @@ Note on seed data:
    ```
    Note: The application attempts to auto-run Alembic migrations on startup if core tables are missing. Still, prefer running migrations explicitly as part of deployment pipelines.
 
-5) Start the API locally (port 3002):
-   ```
-   uvicorn src.api.main:app --reload --host 0.0.0.0 --port 3002
-   ```
-   - OpenAPI docs: http://localhost:3002/docs
+5) Start the API locally (preview expects port 3001):
+   - Using helper launcher:
+     ```
+     python run.py
+     ```
+   - Or directly with uvicorn:
+     ```
+     uvicorn src.api.main:app --reload --host 0.0.0.0 --port 3001
+     ```
+   - OpenAPI docs: http://localhost:3001/docs
 
 ## Environment Variables
 

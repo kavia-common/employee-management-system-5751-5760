@@ -420,6 +420,20 @@ def health_check() -> Dict[str, str]:
 
 
 @app.get(
+    "/health",
+    summary="Health Check (standard)",
+    description="Simple health endpoint returning {'status':'ok'} for monitoring tools.",
+    tags=["Health"],
+)
+# PUBLIC_INTERFACE
+def health_standard() -> Dict[str, str]:
+    """
+    Provide a conventional health endpoint returning a simple status payload.
+    """
+    return {"status": "ok"}
+
+
+@app.get(
     "/healthz",
     summary="Health Check (compat)",
     description=(

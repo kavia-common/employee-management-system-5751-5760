@@ -1,4 +1,8 @@
-# Minimal requirements for [STUB] backend (no DB/ORM/auth libs)
+# Backend requirements for FastAPI app with auth, DB, and migrations
 fastapi==0.115.7
 uvicorn[standard]==0.34.0
 pydantic==2.10.6
+SQLAlchemy==2.0.36
+alembic==1.14.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.17
