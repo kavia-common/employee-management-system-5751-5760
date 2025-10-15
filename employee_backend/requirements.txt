@@ -10,3 +10,5 @@ python-multipart==0.0.17
 python-jose[cryptography]==3.3.0
 # For Pydantic EmailStr support (required dependency)
 email-validator==2.2.0
+python-dotenv==1.0.1
+bcrypt==3.2.2
