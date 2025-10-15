@@ -75,16 +75,63 @@ app = FastAPI(
 # (TrustedHost and ProxyHeaders temporarily removed to stabilize startup)
 # ---------------------------------------------------------------------------
 
-# Definitive CORS settings per request
-CORS_ALLOW_ORIGINS: List[str] = [
-    "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3000",
-    "https://vscode-internal-19668-beta.beta01.cloud.kavia.ai:3002",
+# CORS configuration (environment-driven with safe defaults)
+
+
+def _parse_origins_env(value: str) -> List[str]:
+    """
+    Parse CORS origins from environment.
+    Supports JSON array or comma-separated list.
+    """
+    if not value:
+        return []
+    raw = value.strip()
+    parsed: List[str] = []
+    # Try JSON array
+    if raw.startswith("[") and raw.endswith("]"):
+        try:
+            import json as _json  # local import to keep top-level imports tidy
+            arr = _json.loads(raw)
+            if isinstance(arr, list):
+                parsed = [str(x).strip() for x in arr if str(x).strip()]
+        except Exception:
+            parsed = []
+    if not parsed:
+        parsed = [p.strip() for p in raw.split(",") if p.strip()]
+
+    # Normalize origins: trim trailing slash and lowercase for comparison
+
+    def _normalize(o: str) -> str:
+        o = o.strip()
+        if o.endswith("/"):
+            o = o[:-1]
+        return o.lower()
+    result: List[str] = []
+    seen = set()
+    for item in parsed:
+        norm = _normalize(item)
+        if norm and norm not in seen:
+            seen.add(norm)
+            result.append(norm)
+    return result
+
+
+# Defaults to cover preview and localhost dev
+DEFAULT_ALLOWED_ORIGINS: List[str] = [
+    "https://vscode-internal-23063-beta.beta01.cloud.kavia.ai:3000",
     "http://localhost:3000",
-    "http://localhost:3002",
 ]
-CORS_ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
-CORS_ALLOW_HEADERS: List[str] = ["Authorization", "Content-Type", "X-Correlation-ID", "X-Requested-With"]
-CORS_EXPOSE_HEADERS: List[str] = ["X-Correlation-ID"]
+
+# Prefer ALLOWED_ORIGINS; fall back to legacy CORS_ORIGINS; else defaults.
+_env_origins_raw = os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS") or ""
+_env_origins = _parse_origins_env(_env_origins_raw)
+CORS_ALLOW_ORIGINS: List[str] = _env_origins if _env_origins else DEFAULT_ALLOWED_ORIGINS
+
+# Use permissive wildcard for methods/headers; preflight safety route will reflect request.
+CORS_ALLOW_METHODS: List[str] = ["*"]
+CORS_ALLOW_HEADERS: List[str] = ["*"]
+# Expose correlation header to clients (include both common casings)
+CORS_EXPOSE_HEADERS: List[str] = ["X-Correlation-ID", "X-Correlation-Id"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -390,44 +437,49 @@ def cors_preflight_fallback(path: str, request: Request) -> Response:
     """
     Minimal fallback handler for CORS preflight requests.
 
-    CORSMiddleware should handle OPTIONS before routing. This route ensures that,
-    if OPTIONS reaches routing, the response still includes expected headers
-    for allowed origins.
-
-    Returns 200 with:
-      - Access-Control-Allow-Origin (echoed origin if allowed)
-      - Access-Control-Allow-Methods (configured list)
-      - Access-Control-Allow-Headers (intersection or configured list)
-      - Access-Control-Allow-Credentials: true
-      - Access-Control-Max-Age
-      - Vary: Origin
+    Notes:
+    - CORSMiddleware should handle OPTIONS automatically. This route is a safety net to ensure
+      that if an OPTIONS request reaches routing, proper CORS headers are still returned.
+    - No authentication is performed for preflight requests.
     """
     origin = request.headers.get("origin")
     acr_headers = request.headers.get("access-control-request-headers", "")
+    acr_method = request.headers.get("access-control-request-method", "")
     resp = Response(status_code=200)
 
-    # Always ensure Vary: Origin is set for caches
+    # Always ensure Vary: Origin is set for caches/proxies
     vary_val = resp.headers.get("Vary")
     resp.headers["Vary"] = (vary_val + ", Origin") if vary_val and "Origin" not in vary_val else "Origin"
 
-    # Normalize for comparison
     if _is_origin_allowed(origin):
         # Mirror origin if allowed
         resp.headers["Access-Control-Allow-Origin"] = origin
-        resp.headers["Access-Control-Allow-Methods"] = ", ".join(CORS_ALLOW_METHODS)
 
-        requested = [h.strip() for h in acr_headers.split(",") if h.strip()]
-        allowed_lower = [h.lower() for h in CORS_ALLOW_HEADERS]
-        if requested:
-            # Case-insensitive intersection; if none, return configured list
-            intersection: list[str] = []
-            for h in requested:
-                if h.lower() in allowed_lower and h not in intersection:
-                    intersection.append(h)
-            allow_headers_value = ", ".join(intersection) if intersection else ", ".join(CORS_ALLOW_HEADERS)
+        # Allow-Methods: echo requested method if wildcard; else join configured list
+        methods_wildcard = any(m.strip() == "*" for m in CORS_ALLOW_METHODS)
+        if methods_wildcard:
+            resp.headers["Access-Control-Allow-Methods"] = acr_method or "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         else:
-            allow_headers_value = ", ".join(CORS_ALLOW_HEADERS)
-        resp.headers["Access-Control-Allow-Headers"] = allow_headers_value
+            resp.headers["Access-Control-Allow-Methods"] = ", ".join(CORS_ALLOW_METHODS)
+
+        # Allow-Headers: if wildcard, echo requested headers or '*'
+        headers_wildcard = any(h.strip() == "*" for h in CORS_ALLOW_HEADERS)
+        if headers_wildcard:
+            resp.headers["Access-Control-Allow-Headers"] = acr_headers or "*"
+        else:
+            requested = [h.strip() for h in acr_headers.split(",") if h.strip()]
+            allowed_lower = [h.lower() for h in CORS_ALLOW_HEADERS]
+            if requested:
+                # Case-insensitive intersection; if none, return configured list
+                intersection: list[str] = []
+                for h in requested:
+                    if h.lower() in allowed_lower and h not in intersection:
+                        intersection.append(h)
+                allow_headers_value = ", ".join(intersection) if intersection else ", ".join(CORS_ALLOW_HEADERS)
+            else:
+                allow_headers_value = ", ".join(CORS_ALLOW_HEADERS)
+            resp.headers["Access-Control-Allow-Headers"] = allow_headers_value
+
         resp.headers["Access-Control-Allow-Credentials"] = "true"
         resp.headers["Access-Control-Max-Age"] = "600"
 
